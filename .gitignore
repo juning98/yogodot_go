@@ -1,0 +1,15 @@
+# 运行产物（数据目录：便携模式在 exe 旁，否则 %LOCALAPPDATA%\yogod）
+yogod.exe
+settings.json
+yogod.log
+console.addr
+yogod.ico
+config.bak
+portable
+
+# 打包产物
+dist/
+
+# Go 测试/构建
+*.test
+*.out
