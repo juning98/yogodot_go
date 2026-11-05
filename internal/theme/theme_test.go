@@ -400,6 +400,7 @@ func TestLayoutOverrideApplied(t *testing.T) {
 func TestMaskShape(t *testing.T) {
 	for name, mask := range map[string][frame.KBRows]string{
 		"MBolt": MBolt, "MCrack": MCrack, "MEyes": MEyes, "MTails": MTails, "ECG": ECG,
+		"MInvaders": MInvaders,
 	} {
 		if len(mask) != frame.KBRows {
 			t.Errorf("%s: %d 行，要 %d", name, len(mask), frame.KBRows)
@@ -571,7 +572,7 @@ func TestNoThemeRendersBlank(t *testing.T) {
 	}
 }
 
-// DeepSeek 是唯一一套 Go 原生主题（没有 JS 对照物），这里锁它的设计承诺。
+// DeepSeek 是第一套 Go 原生主题（没有 JS 对照物），这里锁它的设计承诺。
 func TestDeepSeekTheme(t *testing.T) {
 	th, ok := ByID("deepseek")
 	if !ok {
@@ -615,5 +616,96 @@ func TestDeepSeekTheme(t *testing.T) {
 	}
 	if th.KBAnim(0) == th.KBAnim(2.4) {
 		t.Error("KBAnim 对时间不敏感")
+	}
+}
+
+// 所有原生主题的通用承诺：静态/动画可用、纯函数、t=0 与静态帧一致。
+func TestNativeThemes(t *testing.T) {
+	for _, id := range nativeThemeIDs {
+		th, ok := ByID(id)
+		if !ok {
+			t.Fatalf("找不到原生主题 %q", id)
+		}
+		if th.Light.Sum() == 0 {
+			t.Errorf("%s 没有主色", id)
+		}
+		if !th.DotFrame().Any() {
+			t.Errorf("%s 的静态点阵全黑", id)
+		}
+		if th.DotAnim == nil {
+			t.Fatalf("%s 没有 DotAnim", id)
+		}
+		if th.DotAnim(0) != th.DotFrame() {
+			t.Errorf("%s 的 DotAnim(0) 与静态帧不一致", id)
+		}
+		if th.DotAnim(1.5) != th.DotAnim(1.5) {
+			t.Errorf("%s 的 DotAnim 不是纯函数", id)
+		}
+		if th.DotAnim(0) == th.DotAnim(2.4) {
+			t.Errorf("%s 的 DotAnim 对时间不敏感", id)
+		}
+		if th.KBAnim == nil || !th.KBAnim(0).Any() {
+			t.Errorf("%s 的 KBAnim 缺失或 t=0 全黑", id)
+		}
+		if th.KBAnim(0) == th.KBAnim(2.4) {
+			t.Errorf("%s 的 KBAnim 对时间不敏感", id)
+		}
+	}
+}
+
+// 太空侵略者：触角是亮绿；0.9 秒时整只向右挪一格。
+func TestInvaderTheme(t *testing.T) {
+	th, ok := ByID("invader")
+	if !ok {
+		t.Fatal("找不到 invader")
+	}
+	if th.Dot[0][1] != 'G' || th.Dot[3][0] != 'g' {
+		t.Errorf("入侵者的字符画不对：第 0 行 %q，第 3 行 %q", th.Dot[0], th.Dot[3])
+	}
+	if th.DotAnim(0.9)[0][2].Sum() == 0 {
+		t.Error("0.9 秒时没有横移（触角应该从第 1 列挪到第 2 列）")
+	}
+}
+
+// 橡皮鸭：黑眼、橙嘴、蓝水线；3.5 秒眨眼，0.5 秒张嘴，3 秒右漂，8 秒潜水。
+func TestDuckTheme(t *testing.T) {
+	th, ok := ByID("duck")
+	if !ok {
+		t.Fatal("找不到 duck")
+	}
+	if th.Dot[1][2] != 'k' || th.Dot[2][4] != 'o' || th.Dot[5][0] != 'b' {
+		t.Errorf("鸭子的字符画不对：眼 %q，嘴 %q，水 %q", th.Dot[1][2], th.Dot[2][4], th.Dot[5][0])
+	}
+	if got := th.DotAnim(3.5)[1][3]; got != DotColor('y') {
+		t.Errorf("3.5 秒时眼睛 = %v，应该闭上（变成黄）", got)
+	}
+	if got := th.DotAnim(0.5)[2][5]; got != DotColor('o') {
+		t.Errorf("0.5 秒时嘴角 = %v，应该张开（橙）", got)
+	}
+	if th.DotAnim(3.0)[3][0].Sum() != 0 || th.DotAnim(3.0)[3][1].Sum() == 0 {
+		t.Error("3 秒时整只鸭没有向右漂一格")
+	}
+	if th.DotAnim(8.0)[1][2].Sum() != 0 {
+		t.Error("8 秒时鸭子还在水面上，没有潜下去")
+	}
+}
+
+// 蘑菇：红帽、白点、白柄、绿草；8 秒一个生长循环，长满时白点浮出来。
+func TestMushroomTheme(t *testing.T) {
+	th, ok := ByID("mushroom")
+	if !ok {
+		t.Fatal("找不到 mushroom")
+	}
+	if th.Dot[0][1] != 'r' || th.Dot[1][1] != 'w' || th.Dot[3][2] != 'w' || th.Dot[5][1] != 'g' {
+		t.Errorf("蘑菇的字符画不对：%q", th.Dot)
+	}
+	if th.DotAnim(0)[0][2].Sum() == 0 {
+		t.Error("t=0 时菌盖没有顶到第一行")
+	}
+	if th.DotAnim(1.0)[0][2].Sum() != 0 {
+		t.Error("1 秒时还没有缩回土里")
+	}
+	if got := th.DotAnim(6.5)[1][1]; got != (color.RGB{255, 255, 255}) {
+		t.Errorf("长满时白点 = %v，要保持纯白", got)
 	}
 }

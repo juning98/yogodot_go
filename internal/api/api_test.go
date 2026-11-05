@@ -23,6 +23,7 @@ import (
 	"github.com/wednesque/yogod/internal/engine"
 	"github.com/wednesque/yogod/internal/frame"
 	"github.com/wednesque/yogod/internal/store"
+	"github.com/wednesque/yogod/internal/theme"
 )
 
 /* ══════════ 测试脚手架 ══════════
@@ -281,8 +282,9 @@ func TestThemesList(t *testing.T) {
 	}
 	decodeInto(t, rec, &out)
 
-	if len(out.Themes) != 25 {
-		t.Fatalf("主题数 = %d，期望 25（24 套移植 + 1 套原生）", len(out.Themes))
+	want := len(theme.All())
+	if len(out.Themes) != want {
+		t.Fatalf("主题数 = %d，期望 %d（24 套移植 + 原生主题）", len(out.Themes), want)
 	}
 	seen := map[string]bool{}
 	for _, th := range out.Themes {
@@ -310,6 +312,9 @@ func TestThemesList(t *testing.T) {
 	}
 	if !seen["deepseek"] {
 		t.Error("主题列表里没有 deepseek（原生主题没接到 API）")
+	}
+	if !seen["mushroom"] {
+		t.Error("主题列表里没有 mushroom（原生主题没接到 API）")
 	}
 }
 

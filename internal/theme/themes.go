@@ -690,7 +690,7 @@ func buildAll() []Theme {
 
 	// 24 套之后接 Go 原生主题。它们没有 JS 对照物、不参与对拍，
 	// 必须在 diff_test.go 的 nativeThemes 里登记（否则那组测试会报"野主题"）。
-	themes = append(themes, deepseekTheme())
+	themes = append(themes, deepseekTheme(), invaderTheme(), duckTheme(), mushroomTheme())
 	return themes
 }
 

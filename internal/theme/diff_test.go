@@ -54,7 +54,7 @@ func loadThemeFixture(t *testing.T) themeFixture {
 // 对拍只覆盖从原项目逐位搬来的 24 套；新主题没有 JS 对照物，
 // 必须在这里显式登记 —— 否则主题表里悄悄多出一套、没人核对，
 // 这组测试会把它当成"野主题"报出来。
-var nativeThemeIDs = []string{"deepseek"}
+var nativeThemeIDs = []string{"deepseek", "invader", "duck", "mushroom"}
 
 // nativeThemes 是同一个集合的查表版本，给对拍过滤用。
 var nativeThemes = func() map[string]bool {
