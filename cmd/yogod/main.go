@@ -26,7 +26,7 @@ import (
 
 // version 是发布版本号。zip 文件名、控制台页脚、/api/state 都用它 ——
 // 改版本只动这一处。
-const version = "1.0.0"
+const version = "1.0.1"
 
 func main() {
 	// 双击启动（没有任何参数）等价于 `yogod serve`：
