@@ -1,18 +1,36 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>yogod —— ATK YOGO 75 PRO 点阵屏 / 背光控制</title>
-<meta name="description" content="让 ATK YOGO 75 PRO 的像素屏和背光完全听你的：24 套主题、48 张像素图、Coding 伴侣把 AI 工具状态显示在键盘上。Windows 免安装，单文件 exe，不刷固件。">
+<meta name="description" content="ATK YOGO 75 PRO 的第三方控制台：48 张像素图案、24 套主题、Coding 伴侣把 AI 工具状态摆上键盘。Windows 单文件，解压即用。">
 <link rel="icon" href="img/favicon.ico">
+<script>
+// 主题记忆要在第一帧渲染前落上，否则白天用户会先闪一帧黑夜。
+(function(){
+  document.documentElement.dataset.theme =
+    localStorage.getItem('yogod-theme') || 'light';
+})();
+</script>
 <style>
+/* 默认白天；[data-theme="dark"] 整套翻黑。变量与控制台 console.html 同源。 */
 :root{
+  --bg:#F4F2EE; --bg2:#EDEAE2; --panel:#FFFFFF; --panel2:#F0EEE8;
+  --line:#E4E0D7; --line2:#CFC9BC;
+  --ink:#26231C; --dim:#7A7569;
+  --acc:#A57514; --onacc:#FFFFFF; --acc2:#C2570A;
+  --hdr:rgba(244,242,238,.88);
+  --shadow:0 22px 70px -28px rgba(80,64,20,.30),0 4px 18px rgba(0,0,0,.08);
+  --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Consolas,monospace;
+}
+[data-theme="dark"]{
   --bg:#100E0C; --bg2:#14120F; --panel:#1C1A16; --panel2:#232019;
   --line:#2B2721; --line2:#3A352C;
   --ink:#EDEAE3; --dim:#9C968B;
-  --acc:#E0A93E; --acc2:#ff7800;
-  --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Consolas,monospace;
+  --acc:#E0A93E; --onacc:#171409; --acc2:#ff7800;
+  --hdr:rgba(16,14,12,.86);
+  --shadow:0 24px 80px -20px rgba(224,169,62,.14),0 8px 32px rgba(0,0,0,.55);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -20,6 +38,7 @@ body{
   background:var(--bg);color:var(--ink);
   font:15px/1.75 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;
+  transition:background-color .25s,color .25s;
 }
 a{color:var(--acc);text-decoration:none}
 a:hover{text-decoration:underline}
@@ -28,18 +47,26 @@ a:hover{text-decoration:underline}
 /* ── 顶栏 ── */
 header{
   position:sticky;top:0;z-index:10;
-  background:rgba(16,14,12,.86);backdrop-filter:blur(10px);
+  background:var(--hdr);backdrop-filter:blur(10px);
   border-bottom:1px solid var(--line);
+  transition:background-color .25s,border-color .25s;
 }
 header .wrap{display:flex;align-items:center;gap:10px;height:56px}
 .logo{width:22px;height:22px;border-radius:5px}
 .brand{font-weight:700;font-size:17px;letter-spacing:.02em}
 .brand small{color:var(--dim);font-weight:400;font-size:12px;margin-left:8px;font-family:var(--mono)}
-nav{margin-left:auto;display:flex;gap:22px;font-size:14px}
+nav{margin-left:auto;display:flex;gap:22px;align-items:center;font-size:14px}
 nav a{color:var(--dim)}
 nav a:hover{color:var(--ink);text-decoration:none}
 nav a.gh{color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:4px 14px}
 nav a.gh:hover{border-color:var(--acc)}
+.tbtn{
+  width:34px;height:34px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line2);background:var(--panel);color:var(--ink);
+  font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s;
+}
+.tbtn:hover{border-color:var(--acc)}
 
 /* ── Hero ── */
 .hero{padding:88px 0 56px;text-align:center}
@@ -51,14 +78,15 @@ nav a.gh:hover{border-color:var(--acc)}
   display:inline-flex;align-items:center;gap:8px;
   padding:12px 26px;border-radius:10px;font-weight:600;font-size:15px;
   border:1px solid var(--line2);color:var(--ink);background:var(--panel);
+  transition:border-color .15s,background-color .25s;
 }
 .btn:hover{text-decoration:none;border-color:var(--acc)}
-.btn.pri{background:var(--acc);border-color:var(--acc);color:#171409}
-.btn.pri:hover{background:#efb94a}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--onacc)}
+.btn.pri:hover{filter:brightness(1.08)}
 .hero figure{margin:56px auto 0;max-width:900px}
 .shot{
   border:1px solid var(--line);border-radius:14px;display:block;width:100%;
-  box-shadow:0 24px 80px -20px rgba(224,169,62,.14),0 8px 32px rgba(0,0,0,.55);
+  box-shadow:var(--shadow);
 }
 figcaption{color:var(--dim);font-size:12.5px;margin-top:12px;font-family:var(--mono)}
 
@@ -70,7 +98,7 @@ h2::before{content:"· ";color:var(--acc)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
 .card{
   background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;
-  transition:border-color .15s,transform .15s;
+  transition:border-color .15s,transform .15s,background-color .25s;
 }
 .card:hover{border-color:var(--line2);transform:translateY(-2px)}
 .card b{display:block;font-size:15.5px;margin-bottom:6px}
@@ -136,6 +164,7 @@ footer .sp{flex:1}
       <a href="#companion">Coding 伴侣</a>
       <a href="#install">安装</a>
       <a href="#faq">FAQ</a>
+      <button class="tbtn" id="themeBtn" title="切换白天 / 黑夜" aria-label="切换白天 / 黑夜主题"></button>
       <a class="gh" href="https://github.com/juning98/yogodot_go">GitHub</a>
     </nav>
   </div>
@@ -145,9 +174,10 @@ footer .sp{flex:1}
 
   <!-- Hero -->
   <div class="hero">
-    <h1>让键盘的像素屏和背光<br><em>完全听你的</em></h1>
-    <p class="sub">ATK YOGO 75 PRO 第三方控制工具：24 套主题成套换色、48 张像素图点一下就上屏、
-      Coding 伴侣把 AI 工具的任务状态直接显示在键盘上。不刷固件，不开官方 ATK HUB。</p>
+    <h1>键盘右上角那块小屏<br><em>拿来显示点有用的</em></h1>
+    <p class="sub">yogod 是 ATK YOGO 75 PRO 的第三方控制台：像素图案、成套主题、
+      番茄钟之外，还能让 AI 编程工具把「正在干活 / 等你点头」直接亮在键盘上。
+      绿色单文件，不碰固件，也不需要官方驱动。</p>
     <div class="cta">
       <a class="btn pri" href="https://github.com/juning98/yogodot_go/releases/latest">⬇ 下载 Windows 版</a>
       <a class="btn" href="https://github.com/juning98/yogodot_go">源码与文档</a>
@@ -160,10 +190,10 @@ footer .sp{flex:1}
 
   <!-- 功能 -->
   <section id="features">
-    <h2>不只是换图</h2>
-    <p class="lead">单个 exe 内嵌控制台和图标，免安装、零依赖、完全离线。</p>
+    <h2>一把键盘的全部玩法</h2>
+    <p class="lead">单个 exe 内嵌控制台和图标，解压即用，全程离线。</p>
     <div class="grid">
-      <div class="card"><b>24 套主题 / 48 张图案</b><p>皮卡丘、吃豆人、哆啦A梦、初音、EVA、我的世界…… 逐键配色 + 6×6 点阵成套切换，颜色按这把键盘的灯珠校过，不会发白。方向键 ← → 快速试穿。</p></div>
+      <div class="card"><b>24 套主题 / 48 张图案</b><p>皮卡丘、吃豆人、哆啦A梦、初音、EVA、我的世界…… 逐键配色与 6×6 点阵成套切换，颜色按这把键盘的灯珠校过，不会发白。方向键 ← → 快速试穿。</p></div>
       <div class="card"><b>Coding 伴侣</b><p>AI 编程工具的任务状态直接上点阵屏：形状认工具、颜色认状态、节奏认进展。任何客户端接进来就有完整灯语。</p></div>
       <div class="card"><b>番茄钟 / 专注</b><p>点阵外圈走进度、键盘就是进度条，到点自动切场景提醒；专注模式一键全灭，退出恢复原样。</p></div>
       <div class="card"><b>20 个原厂灯效</b><p>背光交给键盘自己的芯片跑，主机一帧不推，最省电。配色由固件决定。</p></div>
@@ -185,9 +215,9 @@ footer .sp{flex:1}
       <tr><td>执行中</td><td><span class="dot" style="background:#005AFF"></span>蓝</td><td>一道流光扫过形状，各家扫法不同</td></tr>
       <tr><td>等你授权</td><td><span class="dot" style="background:#FF3C00"></span>橙</td><td>双跳心跳，一拍强一拍弱</td></tr>
       <tr><td>等你补充</td><td><span class="dot" style="background:#E60023"></span>红</td><td>三连轻叩，一波弱过一波</td></tr>
-      <tr><td>完成</td><td><span class="dot" style="background:#00DC00"></span>绿</td><td>亮一下，光晕从中心荡开，6 秒回空闲</td></tr>
+      <tr><td>完成</td><td><span class="dot" style="background:#00A000"></span>绿</td><td>亮一下，光晕从中心荡开，6 秒回空闲</td></tr>
       <tr><td>出错</td><td><span class="dot" style="background:#FF0000"></span>红</td><td>警示双闪：急两声、长一息，6 秒回空闲</td></tr>
-      <tr><td>空闲</td><td><span class="dot" style="background:#FFFFFF"></span>白</td><td>慢呼吸，偶尔眨眼，吸气顶到纯白</td></tr>
+      <tr><td>空闲</td><td><span class="dot" style="background:#8F8A80"></span>白</td><td>慢呼吸，偶尔眨眼，吸气顶到纯白</td></tr>
     </table>
     <figure class="wide">
       <img class="shot" src="img/console-companion.png" alt="Coding 伴侣页：会话列表、内置工具形状">
@@ -207,23 +237,24 @@ footer .sp{flex:1}
 
   <!-- 安装 -->
   <section id="install">
-    <h2>三步装好，不用装别的</h2>
-    <p class="lead">需要 Windows 10/11；键盘用 2.4G 接收器或数据线连接（蓝牙模式键盘不接受控制，这是固件限制）。</p>
+    <h2>装上只要三步</h2>
+    <p class="lead">只要一台 Windows 10/11 电脑；键盘走 2.4G 接收器或数据线。
+      蓝牙档位不行 —— 那种模式下键盘不开放灯控通道，固件如此，谁都一样。</p>
     <ol class="steps">
-      <li><b>下载 zip 并解压</b><p>从 <a href="https://github.com/juning98/yogodot_go/releases/latest">Releases</a> 下载 <code class="k">yogod-v*-windows-amd64.zip</code>，解压到任意文件夹（约 3 MB，免安装）。</p></li>
-      <li><b>双击 yogod.exe</b><p>常驻右下角托盘，自动打开控制台。第一次 Windows 会拦一下（没买签名证书）：点「更多信息」→「仍要运行」。</p></li>
-      <li><b>点一套主题</b><p>在「主题」页点喜欢的，键盘立刻换装。托盘右键可设开机自启。</p></li>
+      <li><b>下载并解压</b><p>从 <a href="https://github.com/juning98/yogodot_go/releases/latest">Releases</a> 拿 <code class="k">yogod-v*-windows-amd64.zip</code>（约 3 MB），解到任意文件夹。</p></li>
+      <li><b>双击 yogod.exe</b><p>它会常驻右下角托盘并自动打开控制台。首次运行多半被 SmartScreen 拦一下（没买签名证书的正常反应）：「更多信息」→「仍要运行」，只问这一次。</p></li>
+      <li><b>点一套主题</b><p>「主题」页里看顺眼的点下去，键盘立刻换装。开机自启在托盘右键里勾。</p></li>
     </ol>
   </section>
 
   <!-- FAQ -->
   <section id="faq">
     <h2>常见问题</h2>
-    <details open><summary>会不会弄坏键盘？</summary><p>不会。不刷固件、不改按键。画面是实时发给键盘的，不存进键盘里；只有切换背光模式时会改一次键盘配置，跟官方驱动一样。想回到出厂状态，用官方 ATK HUB 的「恢复出厂」。</p></details>
-    <details><summary>要联网吗？</summary><p>不用，完全离线。控制台、hook、全部功能都只走 127.0.0.1。</p></details>
-    <details><summary>关掉软件会怎样？</summary><p>键盘上留着最后一个画面，直到键盘休眠，之后回到键盘自带的显示。再打开软件会自动补上。</p></details>
-    <details><summary>跟 ATK HUB 冲突吗？</summary><p>别同时开 —— 两个软件抢着控制同一把键盘会互相打断。用哪个就退出另一个。</p></details>
-    <details><summary>键盘完全没反应了？</summary><p>多半是键盘没电、没开机，或者开关拨在蓝牙档。插上数据线试试能不能打字；能打字就是无线链路的问题，切回 2.4G 档。</p></details>
+    <details open><summary>会不会弄坏键盘？</summary><p>不会。这个工具只做两件事：往键盘实时推画面、切换背光模式时写一次配置 —— 和官方驱动发给键盘的是同一类指令。固件一个字节都不会动，按键映射也完全不碰。想彻底还原，官方 ATK HUB 里有「恢复出厂」。</p></details>
+    <details><summary>要联网吗？</summary><p>不需要。从控制台到 hook 再到帧引擎，所有通信都发生在 127.0.0.1 上，没有任何一个外网请求。</p></details>
+    <details><summary>关掉软件会怎样？</summary><p>画面是推过去的，不是烧进去的：退出后键盘保持最后一帧，等它自己睡过去就回到出厂显示；下次启动软件会重新接管，不用手动补。</p></details>
+    <details><summary>跟 ATK HUB 冲突吗？</summary><p>二选一。两边同时写同一把键盘，画面会互相覆盖、谁也显示不稳。yogod 被抢走后其实能自己夺回来，但日常还是建议只留一个。</p></details>
+    <details><summary>键盘完全没反应了？</summary><p>先排查最普遍的三个原因：键盘没电、电源没开、档位停在蓝牙。插上线打字，能打说明键盘本身没事，切回 2.4G 档即可。还不行就去 README 的「键盘不动时先看这两个数」。</p></details>
     <details><summary>和 Python 原项目 yogodot 什么关系？</summary><p>Go 重写版：把原项目藏在 Chrome 窗口里的 JS 动画引擎搬进进程内，goroutine 帧泵直接驱动键盘。主题、图案、调色、动画曲线全部与原 JS 逐字节对拍。零第三方依赖，不需要 Python 和 Chrome。</p></details>
   </section>
 
@@ -239,6 +270,23 @@ footer .sp{flex:1}
     <a href="https://github.com/juning98/yogodot_go">GitHub</a>
   </div>
 </footer>
+
+<script>
+// 主题切换：白天 ⇄ 黑夜，选择记在 localStorage；默认白天。
+(function(){
+  var btn = document.getElementById('themeBtn');
+  function sync(){
+    btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀' : '☾';
+  }
+  btn.onclick = function(){
+    var t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
+    localStorage.setItem('yogod-theme', t);
+    sync();
+  };
+  sync();
+})();
+</script>
 
 </body>
 </html>
