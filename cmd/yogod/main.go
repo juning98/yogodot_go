@@ -26,7 +26,7 @@ import (
 
 // version 是发布版本号。zip 文件名、控制台页脚、/api/state 都用它 ——
 // 改版本只动这一处。
-const version = "1.0.1"
+const version = "1.0.2"
 
 func main() {
 	// 双击启动（没有任何参数）等价于 `yogod serve`：
@@ -251,7 +251,7 @@ func cmdTheme(ctx context.Context, args []string) error {
 		return fmt.Errorf("切设备模式失败：%w", err)
 	}
 	// 用 *_At(0) 而不是 DotFrame()/KBFrames()：
-	// 24 套主题的键盘配色全部来自构图函数（LAYOUTS），
+	// 移植主题的键盘配色全部来自构图函数（LAYOUTS），
 	// 字符画字段是空的 —— 直接读 KBFrames() 会推一块全黑的键盘。
 	dot := t.DotAt(0).Encode(deviceCal(), 50, false)
 	if _, err := c.SendMatrix(ctx, dot); err != nil {

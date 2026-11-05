@@ -41,8 +41,9 @@ func countLit(l frame.LEDs) int {
 }
 
 func TestThemeCount(t *testing.T) {
-	if got := len(All()); got != 24 {
-		t.Fatalf("主题数 = %d，要 24", got)
+	want := len(themeIDs) + len(nativeThemeIDs)
+	if got := len(All()); got != want {
+		t.Fatalf("主题数 = %d，要 %d（%d 套移植 + %d 套原生）", got, want, len(themeIDs), len(nativeThemeIDs))
 	}
 	seen := make(map[string]bool)
 	for _, th := range All() {
@@ -58,12 +59,19 @@ func TestThemeCount(t *testing.T) {
 
 func TestThemeOrder(t *testing.T) {
 	all := All()
-	if len(all) != len(themeIDs) {
-		t.Fatalf("主题数 = %d，期望 %d", len(all), len(themeIDs))
+	want := len(themeIDs) + len(nativeThemeIDs)
+	if len(all) != want {
+		t.Fatalf("主题数 = %d，期望 %d", len(all), want)
 	}
 	for i, id := range themeIDs {
 		if all[i].ID != id {
 			t.Errorf("第 %d 套 = %q，期望 %q（顺序必须与 JS 对象字面量一致）", i, all[i].ID, id)
+		}
+	}
+	// 原生主题必须排在移植主题之后，且顺序固定 —— UI 是照这个顺序铺画廊的。
+	for i, id := range nativeThemeIDs {
+		if got := all[len(themeIDs)+i].ID; got != id {
+			t.Errorf("原生第 %d 套 = %q，期望 %q", i, got, id)
 		}
 	}
 }
@@ -307,7 +315,7 @@ func TestLavaDotAnimWorks(t *testing.T) {
 	}
 }
 
-// 21 套由 LAYOUTS 覆盖，3 套自带摆法；24 套都必须能点亮键盘。
+// 21 套由 LAYOUTS 覆盖，3 套自带摆法；加上原生主题，每一套都必须能点亮键盘。
 func TestLayoutsCoverKeyboard(t *testing.T) {
 	if got := len(layoutTable); got != 21 {
 		t.Errorf("LAYOUTS 有 %d 套，要 21 套", got)
@@ -560,5 +568,52 @@ func TestNoThemeRendersBlank(t *testing.T) {
 		if !dot.Any() {
 			t.Errorf("%s 的点阵静态图全黑", th.ID)
 		}
+	}
+}
+
+// DeepSeek 是唯一一套 Go 原生主题（没有 JS 对照物），这里锁它的设计承诺。
+func TestDeepSeekTheme(t *testing.T) {
+	th, ok := ByID("deepseek")
+	if !ok {
+		t.Fatal("找不到 deepseek 主题")
+	}
+	if th.Light != (color.RGB{77, 107, 254}) {
+		t.Errorf("主色 = %v，要品牌蓝 [77 107 254]", th.Light)
+	}
+	// 眼睛是 6×6 上唯一的高光点；尾鳍顶上的凹口是"鲸"和"方块"的分界。
+	if got := th.Dot[3][1]; got != 'w' {
+		t.Errorf("眼睛 = %q，要是 w", got)
+	}
+	if th.Dot[0][3] != 'D' || th.Dot[0][4] != '.' || th.Dot[0][5] != 'D' {
+		t.Errorf("尾鳍顶上的凹口不对：%q", th.Dot[0])
+	}
+	if DotColor('D') != th.Light {
+		t.Errorf("字符 D = %v，与主题主色 %v 不一致", DotColor('D'), th.Light)
+	}
+
+	// 呼吸的余弦从 1 开始：动画第 0 帧必须与静态图逐格一致，
+	// 否则画廊缩略图和真机第一帧对不上。
+	if th.DotAnim(0) != th.DotFrame() {
+		t.Error("DotAnim(0) 与 DotFrame() 不一致")
+	}
+	if th.DotAnim(1.5) != th.DotAnim(1.5) {
+		t.Error("DotAnim 不是纯函数")
+	}
+	if th.DotAnim(0) == th.DotAnim(2.4) {
+		t.Error("DotAnim 对时间不敏感")
+	}
+	// 尾鳍：t=0 左尖在 3，t=1.8 扫到 2（凹口张开）；眼睛在呼吸最暗时仍是纯白。
+	if th.DotAnim(0)[0][3].Sum() == 0 || th.DotAnim(1.8)[0][3].Sum() != 0 || th.DotAnim(1.8)[0][2].Sum() == 0 {
+		t.Error("尾鳍没有摆动")
+	}
+	if got := th.DotAnim(1.8)[3][1]; got != (color.RGB{255, 255, 255}) {
+		t.Errorf("呼吸最暗时眼睛 = %v，要保持纯白", got)
+	}
+
+	if th.KBAnim == nil || !th.KBAnim(0).Any() {
+		t.Fatal("KBAnim 缺失或 t=0 全黑")
+	}
+	if th.KBAnim(0) == th.KBAnim(2.4) {
+		t.Error("KBAnim 对时间不敏感")
 	}
 }

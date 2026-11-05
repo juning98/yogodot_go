@@ -1,13 +1,13 @@
 # yogod —— ATK YOGO 75 PRO 点阵屏 / 背光控制（Go 版）
 
-给 **ATK YOGO 75 PRO** 换一套自己的控制台：点阵屏能放 48 张像素图案，24 套主题让背光和小屏
+给 **ATK YOGO 75 PRO** 换一套自己的控制台：点阵屏能放 48 张像素图案，25 套主题让背光和小屏
 成套变色，Coding 伴侣还会把 AI 工具的工作状态实时摆上键盘。绿色单文件，解压即用，
 不碰固件，也用不着官方驱动。
 
 **Windows 免安装 · 免费开源** · [官网](https://juning98.github.io/yogodot_go/) ·
 Python 原项目：[yogodot](https://github.com/Wednesque/yogodot)
 
-![yogod 控制台：84 键背光与 6×6 点阵的实时预览，下方是 24 套主题](docs/img/console-theme.png)
+![yogod 控制台：84 键背光与 6×6 点阵的实时预览，下方是主题画廊](docs/img/console-theme.png)
 
 ## 下载
 
@@ -32,8 +32,9 @@ exe 没有代码签名证书就会这样，并非报毒。展开「更多信息�
 
 ## 能做什么
 
-- **24 套主题 / 48 张图案**：皮卡丘、吃豆人、哆啦A梦、初音、EVA、我的世界……
+- **25 套主题 / 48 张图案**：皮卡丘、吃豆人、哆啦A梦、初音、EVA、我的世界、DeepSeek 鲸……
   逐键配色 + 6×6 点阵成套切换，颜色按这把键盘的灯珠校过，不会发白。
+  （24 套逐位移植自原项目，DeepSeek 鲸是 Go 版新增的原生主题。）
 - **Coding 伴侣**：AI 编程工具的任务状态直接上点阵屏 —— 形状认工具、颜色认状态、
   节奏认进展（详见下节）。
 - **20 个原厂键盘灯效**：背光交给键盘自己的芯片跑，主机一帧不推，最省电。
@@ -147,7 +148,7 @@ Go 重写：把原项目藏在 Chrome 窗口里的 JS 动画引擎搬进进程�
 ```bash
 yogod probe                 # 列出 HID 接口并握手一次
 yogod status                # 连接、电量、配置回读
-yogod theme                 # 列出 24 套主题
+yogod theme                 # 列出全部主题
 yogod theme pikachu         # 推一套过去（单次执行，不常驻）
 yogod run                   # 前台跑引擎（Ctrl+C 退出）
 yogod bench                 # 推帧压测（开发用）
@@ -173,7 +174,7 @@ $env:YOGO_PORT='8899'; yogod serve
 ```
 GET  /api/ping             健康检查
 GET  /api/state            全量状态（场景/主题/电量/番茄钟/会话/丢帧统计）
-GET  /api/themes           24 套主题（含 6×6 字符画）
+GET  /api/themes           25 套主题（含 6×6 字符画）
 GET  /api/patterns         48 张图案，按 6 组
 GET  /api/agents           伴侣内置工具形状
 POST /api/scene            {id}                  切场景（theme/pomodoro/companion/focus）
@@ -305,7 +306,7 @@ internal/frame/       点阵帧(108B) 与逐键帧(168B) 的编码
 internal/hid/         Windows HID：SetupAPI 枚举 + overlapped 读写
 internal/device/      协议事务、限速、去重、补发、电量、原厂灯效表
 internal/engine/      帧泵、Scene 接口、省电闸门、liveness 对账、预览帧
-internal/theme/       调色板、构图原语、24 套主题、48 张图案
+internal/theme/       调色板、构图原语、24 套移植主题 + 1 套原生、48 张图案
 internal/store/       settings.json（单一来源、原子写、可迁移）
 internal/agent/       伴侣事件的状态机
 internal/companion/   hook 适配器（通用、白名单、只连本机、绝不阻塞）
@@ -324,4 +325,4 @@ docs/img/             README / 官网配图（真机控制台截图）
 ## 许可
 
 MIT。像素图里的角色形象版权归各自所有者，仓库不包含任何官方素材。
-个人项目，与 ATK、Anthropic 都没有关系，风险自负。
+个人项目，与 ATK、Anthropic、DeepSeek 都没有关系，风险自负。

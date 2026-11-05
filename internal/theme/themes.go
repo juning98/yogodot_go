@@ -687,10 +687,15 @@ func buildAll() []Theme {
 			themes[i].KBAnim = own.anim
 		}
 	}
+
+	// 24 套之后接 Go 原生主题。它们没有 JS 对照物、不参与对拍，
+	// 必须在 diff_test.go 的 nativeThemes 里登记（否则那组测试会报"野主题"）。
+	themes = append(themes, deepseekTheme())
 	return themes
 }
 
-// All 按固定顺序返回 24 套主题（顺序即 UI 里的展示顺序，必须与 JS 对象字面量一致）。
+// All 按固定顺序返回全部主题（顺序即 UI 里的展示顺序）：
+// 前 24 套必须与 JS 对象字面量一致，最后是 Go 原生主题。
 func All() []Theme {
 	out := make([]Theme, len(registry))
 	copy(out, registry)

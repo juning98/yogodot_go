@@ -281,8 +281,8 @@ func TestThemesList(t *testing.T) {
 	}
 	decodeInto(t, rec, &out)
 
-	if len(out.Themes) != 24 {
-		t.Fatalf("主题数 = %d，期望 24", len(out.Themes))
+	if len(out.Themes) != 25 {
+		t.Fatalf("主题数 = %d，期望 25（24 套移植 + 1 套原生）", len(out.Themes))
 	}
 	seen := map[string]bool{}
 	for _, th := range out.Themes {
@@ -307,6 +307,9 @@ func TestThemesList(t *testing.T) {
 	}
 	if !seen["pikachu"] {
 		t.Error("主题列表里没有 pikachu")
+	}
+	if !seen["deepseek"] {
+		t.Error("主题列表里没有 deepseek（原生主题没接到 API）")
 	}
 }
 

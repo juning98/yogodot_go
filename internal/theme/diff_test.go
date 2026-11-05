@@ -49,6 +49,41 @@ func loadThemeFixture(t *testing.T) themeFixture {
 	return f
 }
 
+// nativeThemeIDs 是本仓库新增、不来自 yogo.html 的主题，接在 24 套移植主题之后。
+//
+// 对拍只覆盖从原项目逐位搬来的 24 套；新主题没有 JS 对照物，
+// 必须在这里显式登记 —— 否则主题表里悄悄多出一套、没人核对，
+// 这组测试会把它当成"野主题"报出来。
+var nativeThemeIDs = []string{"deepseek"}
+
+// nativeThemes 是同一个集合的查表版本，给对拍过滤用。
+var nativeThemes = func() map[string]bool {
+	m := make(map[string]bool, len(nativeThemeIDs))
+	for _, id := range nativeThemeIDs {
+		m[id] = true
+	}
+	return m
+}()
+
+// ported 返回对拍数据覆盖的主题，并校验表里没有未登记的原生主题。
+func ported(t *testing.T, f themeFixture) []Theme {
+	t.Helper()
+	var out []Theme
+	for _, th := range All() {
+		if _, ok := f.Themes[th.ID]; ok {
+			out = append(out, th)
+			continue
+		}
+		if !nativeThemes[th.ID] {
+			t.Errorf("主题 %q 不在对拍数据里，也没登记为原生主题", th.ID)
+		}
+	}
+	if len(out) != len(f.ThemeOrder) {
+		t.Fatalf("对拍主题数：Go %d，JS %d", len(out), len(f.ThemeOrder))
+	}
+	return out
+}
+
 func ledsOf(t *testing.T, rows [][]int) frame.LEDs {
 	t.Helper()
 	if len(rows) != frame.LEDCount {
@@ -83,12 +118,13 @@ func gridOf(t *testing.T, rows [][][]int) frame.Grid {
 
 func key(t float64) string { return strconv.FormatFloat(t, 'f', -1, 64) }
 
-// TestThemeRegistryMatchesJS 验证主题数量、顺序、id、名字全部一致。
+// TestThemeRegistryMatchesJS 验证移植主题的数量、顺序、id、名字全部一致。
 //
+// 原生主题（当前只有 deepseek）不在 fixture 里，由 ported() 过滤掉；
 // 顺序是 UI 的展示顺序，必须是 JS 对象字面量的顺序，不能是 map 的随机序。
 func TestThemeRegistryMatchesJS(t *testing.T) {
 	f := loadThemeFixture(t)
-	all := All()
+	all := ported(t, f)
 
 	if len(all) != len(f.ThemeOrder) {
 		t.Fatalf("主题数量：Go %d，JS %d", len(all), len(f.ThemeOrder))
@@ -107,7 +143,7 @@ func TestThemeRegistryMatchesJS(t *testing.T) {
 // TestThemeLightMatchesJS 验证每套主题的主色。
 func TestThemeLightMatchesJS(t *testing.T) {
 	f := loadThemeFixture(t)
-	for _, th := range All() {
+	for _, th := range ported(t, f) {
 		entry, ok := f.Themes[th.ID]
 		if !ok {
 			t.Errorf("JS 里没有主题 %q", th.ID)
@@ -123,7 +159,7 @@ func TestThemeLightMatchesJS(t *testing.T) {
 // TestThemeDotArtMatchesJS 验证 6×6 字符画逐字符相同。
 func TestThemeDotArtMatchesJS(t *testing.T) {
 	f := loadThemeFixture(t)
-	for _, th := range All() {
+	for _, th := range ported(t, f) {
 		entry := f.Themes[th.ID]
 		if len(entry.Dot) != frame.DotRows {
 			t.Errorf("%s 的点阵图有 %d 行", th.ID, len(entry.Dot))
@@ -142,7 +178,7 @@ func TestThemeDotArtMatchesJS(t *testing.T) {
 // 静态主题比 kb 字段，动态主题比 t=0 的那一帧。
 func TestKeyboardFramesMatchJS(t *testing.T) {
 	f := loadThemeFixture(t)
-	for _, th := range All() {
+	for _, th := range ported(t, f) {
 		entry := f.Themes[th.ID]
 
 		var wantRows [][]int
@@ -176,7 +212,7 @@ func TestKeyboardFramesMatchJS(t *testing.T) {
 // TestKeyboardAnimationMatchesJS 验证动画在不同时刻也对得上。
 func TestKeyboardAnimationMatchesJS(t *testing.T) {
 	f := loadThemeFixture(t)
-	for _, th := range All() {
+	for _, th := range ported(t, f) {
 		entry := f.Themes[th.ID]
 		if !entry.HasKBAnim {
 			continue
@@ -212,7 +248,7 @@ func TestKeyboardAnimationMatchesJS(t *testing.T) {
 // 见 TestFireAnimationIsSane。
 func TestDotAnimationMatchesJS(t *testing.T) {
 	f := loadThemeFixture(t)
-	for _, th := range All() {
+	for _, th := range ported(t, f) {
 		entry := f.Themes[th.ID]
 		if !entry.HasDotAnim {
 			continue
