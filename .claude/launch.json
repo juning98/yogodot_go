@@ -8,6 +8,12 @@
       "port": 8791
     },
     {
+      "name": "docs-site",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8792", "--directory", "docs"],
+      "port": 8792
+    },
+    {
       "name": "yogod-live",
       "runtimeExecutable": "D:\\Projects\\yogodot-go\\yogod.exe",
       "runtimeArgs": ["serve", "127.0.0.1:8794", "-no-tray", "-no-console"],
