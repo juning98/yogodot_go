@@ -179,7 +179,7 @@ footer .sp{flex:1}
       番茄钟之外，还能让 AI 编程工具把「正在干活 / 等你点头」直接亮在键盘上。
       绿色单文件，不碰固件，也不需要官方驱动。</p>
     <div class="cta">
-      <a class="btn pri" href="https://github.com/juning98/yogodot_go/releases/latest">⬇ 下载 Windows 版</a>
+      <a class="btn pri" href="https://github.com/juning98/yogodot_go/releases/latest"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2v7.6m0 0L4.9 6.6M8 9.8l3.1-3.2M2.6 12.4v1a1 1 0 0 0 1 1h8.8a1 1 0 0 0 1-1v-1"/></svg>下载 Windows 版</a>
       <a class="btn" href="https://github.com/juning98/yogodot_go">源码与文档</a>
     </div>
     <figure>
@@ -273,10 +273,13 @@ footer .sp{flex:1}
 
 <script>
 // 主题切换：白天 ⇄ 黑夜，选择记在 localStorage；默认白天。
+// 图标用内联 SVG，不用字符 —— 日/月这类 Emoji-capable 字符各系统画法不一致。
 (function(){
+  var SUN = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.2v1.5M8 13.3v1.5M1.2 8h1.5M13.3 8h1.5M3.2 3.2l1 1M11.8 11.8l1 1M3.2 12.8l1-1M11.8 4.2l1-1"/></svg>';
+  var MOON = '<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M13.1 9.8A5.4 5.4 0 1 1 6.2 2.9a4.3 4.3 0 1 0 6.9 6.9z"/></svg>';
   var btn = document.getElementById('themeBtn');
   function sync(){
-    btn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀' : '☾';
+    btn.innerHTML = document.documentElement.dataset.theme === 'dark' ? SUN : MOON;
   }
   btn.onclick = function(){
     var t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';

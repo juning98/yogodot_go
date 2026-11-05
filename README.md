@@ -11,13 +11,13 @@ Python 原项目：[yogodot](https://github.com/Wednesque/yogodot)
 
 ## 下载
 
-**[⬇ 下载最新版 yogod（windows-amd64.zip，约 3 MB）](https://github.com/juning98/yogodot_go/releases/latest)**
+**[下载最新版 yogod（windows-amd64.zip，约 3 MB）](https://github.com/juning98/yogodot_go/releases/latest)**
 
-| 需要 | |
+| 条件 | 说明 |
 |---|---|
-| ✅ Windows 10 / 11 | 不用装 Go、Python 或任何运行时 |
-| ✅ 键盘用 **2.4G 接收器**或**数据线**连电脑 | |
-| ❌ **蓝牙连接用不了** | 蓝牙模式下键盘的灯控通道不开放，这是固件决定的，任何第三方软件都一样 |
+| **需要** Windows 10 / 11 | 不用装 Go、Python 或任何运行时 |
+| **需要** 键盘用 2.4G 接收器或数据线连接 | |
+| **不支持** 蓝牙连接 | 蓝牙模式下键盘的灯控通道不开放，这是固件决定的，任何第三方软件都一样 |
 
 1. 下载 zip，解压到任意文件夹（免安装，单个 exe 内嵌控制台和图标）
 2. 双击 `yogod.exe` —— 常驻右下角托盘，自动打开控制台（http://127.0.0.1:25264）
