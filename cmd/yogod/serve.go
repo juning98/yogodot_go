@@ -619,7 +619,21 @@ func (a *app) setKBEffect(id int) error {
 	if sc == nil {
 		return nil
 	}
-	return a.switchTheme(sc.Theme.ID, sc.Dynamic, false)
+	if err := a.switchTheme(sc.Theme.ID, sc.Dynamic, false); err != nil {
+		return err
+	}
+	// 伴侣的背光是从主题场景透传的：switchTheme(enter=false) 只换了帧源，
+	// 背光模式（固件效果号 / 254 推流）只有场景 Enter 才写进设备。
+	// 不重进伴侣：选固件灯效 = 推流帧停了、模式还是 254，键盘冻在最后一帧；
+	// 切回主题配色 = 帧恢复推、模式却是固件效果，帧全被忽略。
+	// 专注/番茄钟的背光语义自管（全灭/自推帧），下次进场景时自然带上。
+	a.mu.Lock()
+	scene, comp := a.sceneID, a.comp
+	a.mu.Unlock()
+	if scene == "companion" && comp != nil {
+		return a.switchScene("companion", comp)
+	}
+	return nil
 }
 
 // pomodoroLoop 每秒推进一次番茄钟。

@@ -6,9 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/wednesque/yogod/internal/agent"
 	"github.com/wednesque/yogod/internal/device"
 	"github.com/wednesque/yogod/internal/engine"
 	"github.com/wednesque/yogod/internal/proto"
+	"github.com/wednesque/yogod/internal/store"
+	"github.com/wednesque/yogod/internal/theme"
 )
 
 // 内嵌图标必须真的落到数据目录,且重复调用不重写（否则每次启动都写盘）。
@@ -80,6 +83,53 @@ func TestExpectedBLMode(t *testing.T) {
 	if got := expectedBLMode(sc); got != byte(eff.ID) {
 		t.Errorf("固件灯效期望 %d，实际 %d", eff.ID, got)
 	}
+}
+
+// 伴侣场景下切背光来源必须重进伴侣：固件效果号 / 254 推流只在场景 Enter
+// 写设备。不重进的话选原厂灯效后推流帧停了、设备还停在 254 等帧 ——
+// 键盘冻在最后一帧（"伴侣下选原厂灯效卡死"的 bug）。
+//
+// 探针：设备不在时 Enter 必然失败，错误沿 switchScene → setKBEffect 报回来；
+// 没触发重进的话全程不碰设备，返回 nil。
+func TestSetKBEffectReentersCompanion(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &app{dir: dir, st: st}
+	a.dev = &device.Controller{} // 不连接：任何配置写都会快速报未连接
+	a.eng = engine.New(a.dev, engine.Options{})
+	a.comp = &engine.CompanionScene{Store: agent.NewStore()}
+	a.themeScene = a.newThemeScene(theme.Default().ID, true)
+	a.comp.SetKeys(a.themeScene)
+
+	eff, ok := device.EffectByID(1)
+	if !ok {
+		t.Skip("灯效表为空")
+	}
+
+	a.sceneID = "companion"
+	if err := a.setKBEffect(eff.ID); err == nil {
+		t.Fatal("伴侣下切原厂灯效没触发场景重进 —— 设备模式没写，键盘会冻在最后一帧")
+	}
+	// 设备写失败不该回滚用户的选择：设置已落库，链路恢复后会补上
+	a.st.View(func(s *store.Settings) {
+		if s.KBEffect == nil || *s.KBEffect != eff.ID {
+			t.Fatalf("灯效选择应已保存，实际 %+v", s.KBEffect)
+		}
+	})
+
+	// 专注的背光语义自管（全灭）：不切设备、不报错，下次进场景自然带上
+	a.sceneID = "focus"
+	if err := a.setKBEffect(-1); err != nil {
+		t.Fatalf("专注下切灯效应只记账（下次进场景生效），报错 %v", err)
+	}
+	a.st.View(func(s *store.Settings) {
+		if s.KBEffect != nil {
+			t.Fatal("id=-1 应清掉灯效设置")
+		}
+	})
 }
 
 // 端口固定后不再顺延：被占就直接报错。
