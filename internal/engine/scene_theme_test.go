@@ -18,14 +18,14 @@ func TestThemeScenePatternOverridesDot(t *testing.T) {
 	}
 	th := theme.Default()
 
-	sc := NewThemeScene(th, true, color.Calibration{Gain: [3]float64{1, 1, 1}, Sat: 1, EQL: 255})
+	sc := NewThemeScene(th, true)
 	sc.Pattern = &p
 
-	r := sc.Frame(0)
+	r := sc.Frame(0, Channels{true, true})
 	if r.Matrix == nil {
 		t.Fatal("图案模式下点阵帧不应为空")
 	}
-	want := theme.DotFromArt(p.Art).Encode(sc.Cal, sc.DotBright, sc.ApplyDotCalib)
+	want := theme.DotFromArt(p.Art)
 	if *r.Matrix != want {
 		t.Error("图案模式的点阵帧 ≠ 图案的编码结果")
 	}
@@ -34,24 +34,24 @@ func TestThemeScenePatternOverridesDot(t *testing.T) {
 	}
 
 	// 动态开启时背光应随时间演化（取一个非零时刻对比）
-	k0 := sc.Frame(0).Keys
-	k1 := sc.Frame(time.Second).Keys
+	k0 := sc.Frame(0, Channels{true, true}).Keys
+	k1 := sc.Frame(time.Second, Channels{true, true}).Keys
 	if th.Dynamic() && k0 != nil && k1 != nil && *k0 == *k1 {
 		t.Error("动态主题的背光应随时间变化")
 	}
 
 	// 置 nil 恢复主题默认点阵
 	sc.Pattern = nil
-	r2 := sc.Frame(0)
-	want2 := th.DotAt(0).EncodeAnimated(sc.Cal, sc.DotBright, sc.ApplyDotCalib)
+	r2 := sc.Frame(0, Channels{true, true})
+	want2 := th.DotAt(0)
 	if *r2.Matrix != want2 {
 		t.Error("清除图案后点阵应恢复主题默认")
 	}
 
 	// 关闭动态后继续使用普通编码，不引入空间量化。
 	sc.Dynamic = false
-	wantStatic := th.DotFrame().Encode(sc.Cal, sc.DotBright, sc.ApplyDotCalib)
-	if got := sc.Frame(time.Second); *got.Matrix != wantStatic {
+	wantStatic := th.DotFrame()
+	if got := sc.Frame(time.Second, Channels{true, true}); *got.Matrix != wantStatic {
 		t.Error("静态主题的点阵编码被动画量化改变")
 	}
 }
@@ -59,13 +59,13 @@ func TestThemeScenePatternOverridesDot(t *testing.T) {
 // 低亮度下鲸身不能整片同步跳红，同时保留原色比和 22% 呼吸幅度。
 func TestDeepSeekLowBrightnessBreathing(t *testing.T) {
 	th, _ := theme.ByID("deepseek")
-	sc := NewThemeScene(th, true, color.DefaultCalibration())
-	sc.DotBright = 10
+	sc := NewThemeScene(th, true)
+	const dotBright = 10
 	var prev frame.Matrix
 	var prevGrid frame.Grid
 	minB, maxB := 255.0, 0.0
 	for at := time.Duration(0); at < 8*time.Second; at += 67 * time.Millisecond {
-		m, g := *sc.Frame(at).Matrix, th.DotAt(at.Seconds())
+		m, g := sc.Frame(at, Channels{Matrix: true}).Matrix.EncodeAnimated(color.DefaultCalibration(), dotBright, false), th.DotAt(at.Seconds())
 		var actual, ideal [3]float64
 		body, redChanges := 0, 0
 		for r := range g {
@@ -77,7 +77,7 @@ func TestDeepSeekLowBrightnessBreathing(t *testing.T) {
 				off := (r*frame.DotCols + c) * 3
 				for ch := range actual {
 					actual[ch] += float64(m[off+ch])
-					ideal[ch] += px[ch] * sc.DotBright / 100
+					ideal[ch] += px[ch] * dotBright / 100
 				}
 				if at > 0 && prevGrid[r][c][0] > 0 && m[off] != prev[off] {
 					redChanges++

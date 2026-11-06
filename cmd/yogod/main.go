@@ -26,7 +26,7 @@ import (
 
 // version 是发布版本号。zip 文件名、控制台页脚、/api/state 都用它 ——
 // 改版本只动这一处。
-const version = "1.0.4"
+const version = "1.1.0"
 
 func main() {
 	// 双击启动（没有任何参数）等价于 `yogod serve`：
@@ -254,11 +254,11 @@ func cmdTheme(ctx context.Context, args []string) error {
 	// 移植主题的键盘配色全部来自构图函数（LAYOUTS），
 	// 字符画字段是空的 —— 直接读 KBFrames() 会推一块全黑的键盘。
 	dot := t.DotAt(0).Encode(deviceCal(), 50, false)
-	if _, err := c.SendMatrix(ctx, dot); err != nil {
+	if err := c.SendMatrix(ctx, dot); err != nil {
 		return err
 	}
 	keys := t.KBAt(0).Encode(deviceCal(), 70)
-	if _, err := c.SendKeys(ctx, keys); err != nil {
+	if err := c.SendKeys(ctx, keys); err != nil {
 		return err
 	}
 	fmt.Printf("已推送主题 %s（%s）\n", t.ID, t.Name)

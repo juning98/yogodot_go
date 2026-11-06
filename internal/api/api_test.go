@@ -19,6 +19,7 @@ import (
 
 	"github.com/wednesque/yogod/internal/agent"
 	"github.com/wednesque/yogod/internal/api"
+	"github.com/wednesque/yogod/internal/color"
 	"github.com/wednesque/yogod/internal/device"
 	"github.com/wednesque/yogod/internal/engine"
 	"github.com/wednesque/yogod/internal/frame"
@@ -42,40 +43,41 @@ type nullSink struct {
 	matrx int
 }
 
-func (s *nullSink) SendMatrix(context.Context, frame.Matrix) (device.Result, error) {
+func (s *nullSink) SendMatrix(context.Context, frame.Matrix) error {
 	s.mu.Lock()
 	s.matrx++
 	s.mu.Unlock()
-	return device.Result{Sent: true}, nil
+	return nil
 }
 
-func (s *nullSink) SendKeys(context.Context, frame.Keys) (device.Result, error) {
+func (s *nullSink) SendKeys(context.Context, frame.Keys) error {
 	s.mu.Lock()
 	s.keys++
 	s.mu.Unlock()
-	return device.Result{Sent: true}, nil
+	return nil
 }
 
-func (s *nullSink) FlushPending(context.Context) {}
+func (s *nullSink) ApplyMode(context.Context, device.Mode) error { return nil }
 
 // gridScene 每帧把时钟刻进帧里，保证内容一直在变。
 type gridScene struct{}
 
-func (gridScene) Name() string                                    { return "grid" }
-func (gridScene) Enter(context.Context, *device.Controller) error { return nil }
-func (gridScene) Exit(context.Context, *device.Controller)        {}
-
-func (gridScene) Frame(t time.Duration) engine.Render {
-	var m frame.Matrix
-	var k frame.Keys
+func (gridScene) Name() string               { return "grid" }
+func (gridScene) Animation() engine.Channels { return engine.Channels{Matrix: true, Keys: true} }
+func (gridScene) Mode() device.Mode          { return device.Mode{Matrix: true, Keys: true, Effect: -1} }
+func (gridScene) Frame(t time.Duration, ch engine.Channels) engine.Picture {
+	var m frame.Grid
+	var k frame.LEDs
 	v := byte(t / time.Millisecond)
-	for i := range m {
-		m[i] = v + byte(i)
+	for r := range m {
+		for c := range m[r] {
+			m[r][c] = color.RGBFloat{float64(v), float64(c), float64(r)}
+		}
 	}
 	for i := range k {
-		k[i] = v ^ byte(i)
+		k[i] = color.RGB{v, byte(i), 0}
 	}
-	return engine.Render{Matrix: &m, Keys: &k}
+	return engine.Picture{Matrix: &m, Keys: &k}
 }
 
 type harness struct {
@@ -228,7 +230,7 @@ func TestDeviceJSONIsLowerCamel(t *testing.T) {
 	if !ok {
 		t.Fatalf("device 不是对象：%T", m["device"])
 	}
-	for _, k := range []string{"connected", "awake", "product", "wired", "power", "error", "dropped"} {
+	for _, k := range []string{"connected", "awake", "product", "wired", "power", "error"} {
 		if _, ok := dev[k]; !ok {
 			t.Errorf("device 缺字段 %q（现有：%v）", k, keysOf(dev))
 		}
@@ -475,10 +477,10 @@ func TestBrightnessClamped(t *testing.T) {
 	if h.set.Bright.Keys != 0 {
 		t.Errorf("keys 应被夹到 0，实际 %v", h.set.Bright.Keys)
 	}
-	// 亮度改完要重建场景才生效
+	// 亮度属于输出参数，不能重建场景或重置动画相位
 	_, themes, _ := h.calls()
-	if len(themes) != 1 {
-		t.Errorf("亮度变更后应重建场景一次，实际 %v", themes)
+	if len(themes) != 0 {
+		t.Errorf("亮度变更不应重建场景，实际 %v", themes)
 	}
 }
 
@@ -791,7 +793,7 @@ func TestSettingsRateTier(t *testing.T) {
 		Engine: h.eng, Device: &device.Controller{}, Settings: h.set,
 		Agent: h.ag, Pomodoro: h.pom, Console: api.ConsoleFS(),
 		Save:        func() error { return h.set.Save() },
-		SetRateTier: func(tier int) { got = tier },
+		ApplyOutput: func() { got = h.set.Snapshot().RateTier },
 	})
 	rec := h.do(http.MethodPost, "/api/settings", map[string]any{"rate_tier": 2})
 	if rec.Code != http.StatusOK {
@@ -801,7 +803,7 @@ func TestSettingsRateTier(t *testing.T) {
 		t.Errorf("RateTier 应为 2，实际 %d", h.set.RateTier)
 	}
 	if got != 2 {
-		t.Errorf("SetRateTier 钩子应收到 2，实际 %d", got)
+		t.Errorf("全局输出管线应收到档位 2，实际 %d", got)
 	}
 	again, err := store.Open(h.dir)
 	if err != nil {
@@ -894,7 +896,7 @@ func TestKBStatus(t *testing.T) {
 	if out["connected"] != false {
 		t.Errorf("没接键盘却报 connected=%v", out["connected"])
 	}
-	for _, k := range []string{"awake", "product", "wired", "dropped"} {
+	for _, k := range []string{"awake", "product", "wired"} {
 		if _, ok := out[k]; !ok {
 			t.Errorf("/kb/status 缺字段 %q", k)
 		}
@@ -1106,7 +1108,7 @@ func TestSSESlowSubscriberDoesNotBlock(t *testing.T) {
 	r := dialSSE(t, h.srv, "/api/events")
 	defer r.close()
 
-	// 占满订阅者缓冲区（hub 里是 16），再多推 50 次
+	// 连续发布 50 次，慢订阅者应只保留最新值而不阻塞发布者。
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

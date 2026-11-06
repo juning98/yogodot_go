@@ -58,8 +58,14 @@ type Idle struct {
 }
 
 // Settings 是整个程序的配置。
-type Settings struct {
-	Version int `json:"version"`
+type Outputs struct {
+	Dot  bool `json:"dot"`
+	Keys bool `json:"keys"`
+}
+
+type Config struct {
+	Outputs Outputs `json:"outputs"`
+	Version int     `json:"version"`
 
 	// Theme 是当前主题 id。
 	Theme string `json:"theme"`
@@ -94,7 +100,12 @@ type Settings struct {
 	// IdleAgent 是伴侣场景空闲时显示的工具形状 id；
 	// 空串 = 跟随最近会话（没有会话或不认识时显示兜底宝石）。
 	IdleAgent string `json:"idle_agent"`
+}
 
+// Settings 将内存快照锁与串行落盘锁分开。
+type Settings struct {
+	Config
+	saveMu sync.Mutex
 	// path 是这份配置写在哪，不参与序列化。
 	path string
 	mu   sync.Mutex
@@ -102,7 +113,7 @@ type Settings struct {
 
 // Defaults 返回默认配置。
 func Defaults() Settings {
-	return Settings{
+	return Settings{Config: Config{
 		Version: Version,
 		Theme:   "pikachu",
 		Mode:    "theme",
@@ -123,7 +134,8 @@ func Defaults() Settings {
 		// 保护省下的带宽是零头,代价却是打字时动画定格。信号差时链路
 		// 本身卡,保护也救不了。需要时在控制台键盘页打开。
 		TypingGuard: false,
-	}
+		Outputs:     Outputs{Dot: true, Keys: true},
+	}}
 }
 
 // Open 读取（或初始化）dir 下的配置。
@@ -177,24 +189,31 @@ func (s *Settings) Update(f func(*Settings)) {
 }
 
 // View 在锁内读配置。运行期读方（state 组装、场景重建）走这里。
-func (s *Settings) View(f func(*Settings)) {
+func (s *Settings) Snapshot() Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f(s)
+	c := s.Config
+	if c.KBEffect != nil {
+		id := *c.KBEffect
+		c.KBEffect = &id
+	}
+	return c
 }
+func (s *Settings) View(f func(*Settings)) { c := Settings{Config: s.Snapshot()}; f(&c) }
 
 // Save 原子地写回配置。
 //
 // 先写临时文件再 Rename：中途崩了也不会留下半个 JSON，
 // 旧版直接 json.dump 打开的文件，崩在写一半就是配置文件废掉。
 func (s *Settings) Save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	snapshot := s.Snapshot()
 
 	if s.path == "" {
 		return errors.New("store: 没有配置路径")
 	}
-	raw, err := json.MarshalIndent(s, "", "  ")
+	raw, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
 	}

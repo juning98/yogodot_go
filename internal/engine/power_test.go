@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/wednesque/yogod/internal/device"
-	"github.com/wednesque/yogod/internal/frame"
 )
 
 // TestDecide 锁定熄屏策略。
@@ -72,59 +71,5 @@ func TestPowerMonitorDebouncesLock(t *testing.T) {
 	}
 	if got := m.Poll(); got != KeepOn {
 		t.Fatalf("解锁后应恢复，实际 %v", got)
-	}
-}
-
-// TestShouldEmitReblanks 确认熄屏期间会定期补一帧全黑。
-//
-// 固件在一段时间收不到点阵帧后会自己退出同步态、把存储的画面重画回来。
-// 只在刚熄灭那一刻发一帧，管不住整夜。
-func TestShouldEmitReblanks(t *testing.T) {
-	m := &PowerMonitor{
-		LockFn: func() bool { return false },
-		IdleFn: func() float64 { return IdleBlankAfter.Seconds() + 1 }, // 已离开
-	}
-	m.Poll()
-	m.Poll()
-	if m.Action() != BlankAll {
-		t.Fatalf("应处于全灭状态，实际 %v", m.Action())
-	}
-
-	now := time.Now()
-	if !m.ShouldEmit(now) {
-		t.Fatal("刚进入熄屏应立刻发一帧")
-	}
-	if m.ShouldEmit(now.Add(time.Second)) {
-		t.Fatal("一秒后不该再发")
-	}
-	if !m.ShouldEmit(now.Add(ReblankEvery + time.Second)) {
-		t.Fatal("超过补黑间隔应再发一帧")
-	}
-}
-
-// TestBlankFor 确认每种处置灭的是对的那一半。
-func TestBlankFor(t *testing.T) {
-	cases := []struct {
-		a          Action
-		matrix, kb bool
-	}{
-		{BlankAll, true, true},
-		{BlankMatrix, true, false},
-		{BlankKeys, false, true},
-	}
-	for _, c := range cases {
-		r := blankFor(c.a)
-		if (r.Matrix != nil) != c.matrix {
-			t.Errorf("%v: Matrix 是否存在应为 %v", c.a, c.matrix)
-		}
-		if (r.Keys != nil) != c.kb {
-			t.Errorf("%v: Keys 是否存在应为 %v", c.a, c.kb)
-		}
-		if r.Matrix != nil && *r.Matrix != (frame.Matrix{}) {
-			t.Errorf("%v: 点阵帧不是全黑", c.a)
-		}
-		if r.Keys != nil && *r.Keys != (frame.Keys{}) {
-			t.Errorf("%v: 键盘帧不是全灭", c.a)
-		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -28,6 +29,8 @@ import (
 
 // Deps 是 API 需要的全部依赖，由 main 装配。
 type Deps struct {
+	// Control 与托盘、自动场景切换共享命令锁。
+	Control  sync.Locker
 	Engine   *engine.Engine
 	Device   *device.Controller
 	Settings *store.Settings
@@ -47,16 +50,10 @@ type Deps struct {
 	// （Settings 落盘由 Save 负责，这里只更新引擎侧的判定）。
 	// 为 nil 时配置照常保存，只是运行中的实例不热更新。
 	SetTypingGuard func(on bool)
-	// SetRateTier 由 main 提供：推帧档位的实时生效钩子（0 默认 / 1 流畅 / 2 极速）
-	SetRateTier func(tier int)
 	// SetIdleAgent 由 main 提供：空闲时显示的工具形状（"" / "auto" = 跟随会话）。
 	SetIdleAgent func(id string)
-	// RebuildTheme 由 main 提供：亮度等参数变化后的被动重建——只换素材，
-	// 不打断正在看的场景（从伴侣里拖亮度滑杆不该把场景踢回主题）。
-	RebuildTheme func() error
-	// SetCalib 由 main 提供：校准参数热更新，运行中的场景立刻按新参数出帧，
-	// 不用重启服务。
-	SetCalib func(c store.Calibration) error
+	// ApplyOutput 只发布全局参数，所有场景共用。
+	ApplyOutput func()
 	// SetIdlePolicy 由 main 提供：熄屏策略的热更新钩子（省电监视器阈值）。
 	SetIdlePolicy func(idle store.Idle)
 	// ExePath 是 yogod 可执行文件的绝对路径，控制台生成接入指令时给 Agent 用。
@@ -74,10 +71,8 @@ type Server struct {
 	hub *hub
 	mux *http.ServeMux
 
-	mu      sync.Mutex
-	scene   string
-	themeID string
-	dynamic bool
+	commands    sync.Mutex
+	broadcastMu sync.Mutex
 }
 
 // New 创建一个 API 服务。
@@ -86,25 +81,32 @@ func New(d Deps) *Server {
 		d.Logf = func(string, ...any) {}
 	}
 	s := &Server{
-		d:       d,
-		hub:     newHub(),
-		mux:     http.NewServeMux(),
-		scene:   d.Settings.Mode,
-		themeID: d.Settings.Theme,
-		dynamic: d.Settings.Dynamic,
+		d:   d,
+		hub: newHub(),
+		mux: http.NewServeMux(),
 	}
 	s.routes()
 	return s
 }
 
 // Handler 返回 http.Handler。
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			lock := s.d.Control
+			if lock == nil {
+				lock = &s.commands
+			}
+			lock.Lock()
+			defer lock.Unlock()
+		}
+		s.mux.ServeHTTP(w, r)
+	})
+}
 
-// SetSceneState 让 main 在切场景后同步一下（用于 /api/state）。
+// SetSceneState 发布场景选择，状态读取统一来自 Settings 快照。
 func (s *Server) SetSceneState(id string) {
-	s.mu.Lock()
-	s.scene = id
-	s.mu.Unlock()
+	s.d.Settings.Update(func(c *store.Settings) { c.Mode = id })
 	s.Broadcast()
 }
 
@@ -149,15 +151,17 @@ type SessionBrief struct {
 
 // State 是一次全量查询的结果。
 type State struct {
-	Scene     string           `json:"scene"`
-	Theme     string           `json:"theme"`
-	ThemeName string           `json:"themeName"`
-	Dynamic   bool             `json:"dynamic"`
-	Device    device.Status    `json:"device"`
-	Pomodoro  engine.PomStatus `json:"pomodoro"`
-	Sessions  []SessionBrief   `json:"sessions"`
-	Top       *SessionBrief    `json:"top,omitempty"`
-	SceneID   string           `json:"sceneId"`
+	Output    engine.OutputStatus `json:"output"`
+	Settings  store.Config        `json:"settings"`
+	Scene     string              `json:"scene"`
+	Theme     string              `json:"theme"`
+	ThemeName string              `json:"themeName"`
+	Dynamic   bool                `json:"dynamic"`
+	Device    device.Status       `json:"device"`
+	Pomodoro  engine.PomStatus    `json:"pomodoro"`
+	Sessions  []SessionBrief      `json:"sessions"`
+	Top       *SessionBrief       `json:"top,omitempty"`
+	SceneID   string              `json:"sceneId"`
 	// KBEffect 是当前生效的原厂键盘灯效 id；-1 表示走主题逐键配色。
 	KBEffect int `json:"kbEffect"`
 	// Pattern 是当前图案库单选图案 id；空串 = 点阵走主题默认。
@@ -169,9 +173,8 @@ type State struct {
 }
 
 func (s *Server) state() State {
-	s.mu.Lock()
-	scene, themeID, dyn := s.scene, s.themeID, s.dynamic
-	s.mu.Unlock()
+	cfg := s.d.Settings.Snapshot()
+	scene, themeID, dyn := cfg.Mode, cfg.Theme, cfg.Dynamic
 
 	// Sessions 先给成空切片而不是 nil：nil 会序列化成 null，
 	// 调用方写 sessions.map(...) 就得先判空。
@@ -183,9 +186,14 @@ func (s *Server) state() State {
 		st.ThemeName = t.Name
 	}
 	st.Device = s.d.Device.Status()
+	st.Output = s.d.Engine.Status()
+	st.Settings = cfg
 	st.Pomodoro = s.d.Pomodoro.Status(time.Now())
-	st.KBEffect = s.kbEffect()
-	s.d.Settings.View(func(cfg *store.Settings) { st.Pattern = cfg.Pattern })
+	st.KBEffect = -1
+	if cfg.KBEffect != nil {
+		st.KBEffect = *cfg.KBEffect
+	}
+	st.Pattern = cfg.Pattern
 	st.ExePath = s.d.ExePath
 	st.Version = s.d.Version
 
@@ -273,16 +281,20 @@ func (s *Server) handlePattern(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// 先改配置再调钩子：钩子里重建场景时会读这个新值。
-	s.d.Settings.Update(func(st *store.Settings) { st.Pattern = req.ID })
+	before := s.d.Settings.Snapshot().Pattern
+	s.d.Settings.Update(func(c *store.Settings) { c.Pattern = req.ID })
+	if err := s.d.Save(); err != nil {
+		s.d.Settings.Update(func(c *store.Settings) { c.Pattern = before })
+		http.Error(w, err.Error(), 500)
+		return
+	}
 	if s.d.SetPattern != nil {
 		if err := s.d.SetPattern(req.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.d.Settings.Update(func(c *store.Settings) { c.Pattern = before })
+			err = errors.Join(err, s.d.Save())
+			http.Error(w, err.Error(), 500)
 			return
 		}
-	}
-	if err := s.d.Save(); err != nil {
-		s.d.Logf("保存配置失败：%v", err)
 	}
 	s.Broadcast()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pattern": req.ID})
@@ -335,19 +347,22 @@ func (s *Server) handleScene(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.ID == "" {
-		http.Error(w, "缺少 id", http.StatusBadRequest)
+	switch req.ID {
+	case "theme", "focus", "companion", "pomodoro":
+	default:
+		http.Error(w, "未知场景", 400)
 		return
 	}
-	if req.Theme != "" && req.Theme != s.curTheme() {
-		if err := s.applyTheme(req.Theme, s.curDynamic()); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
+	id, dyn := s.curTheme(), s.curDynamic()
+	if req.Theme != "" {
+		id = req.Theme
 	}
-	if req.Dynamic != nil && *req.Dynamic != s.curDynamic() {
-		if err := s.applyTheme(s.curTheme(), *req.Dynamic); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+	if req.Dynamic != nil {
+		dyn = *req.Dynamic
+	}
+	if id != s.curTheme() || dyn != s.curDynamic() {
+		if err := s.applyTheme(id, dyn); err != nil {
+			http.Error(w, err.Error(), 502)
 			return
 		}
 	}
@@ -387,34 +402,32 @@ func (s *Server) applyTheme(id string, dynamic bool) error {
 	if _, ok := theme.ByID(id); !ok {
 		return fmt.Errorf("没有主题 %q", id)
 	}
-	// 换成另一套主题 = 还原那套主题的完整画面：图案库单选只对当前主题生效。
-	// 必须在 SwitchTheme 之前清 —— 钩子重建场景时读的就是 Settings.Pattern。
-	// 切换失败把旧图案还回来，切换失败不该顺手丢设置。
-	// 同主题重推（含动/静态切换）保留图案。
-	var oldPattern string
-	s.d.Settings.View(func(st *store.Settings) { oldPattern = st.Pattern })
-	if id != s.curTheme() {
-		s.d.Settings.Update(func(st *store.Settings) { st.Pattern = "" })
-	}
-	if err := s.d.SwitchTheme(id, dynamic); err != nil {
-		if id != s.curTheme() {
-			s.d.Settings.Update(func(st *store.Settings) { st.Pattern = oldPattern })
+	before := s.d.Settings.Snapshot()
+	s.d.Settings.Update(func(c *store.Settings) {
+		if c.Theme != id {
+			c.Pattern = ""
 		}
-		return err
-	}
-	s.mu.Lock()
-	s.themeID = id
-	s.dynamic = dynamic
-	s.scene = "theme"
-	s.mu.Unlock()
-
-	s.d.Settings.Update(func(st *store.Settings) {
-		st.Theme = id
-		st.Dynamic = dynamic
-		st.Mode = "theme"
+		c.Theme = id
+		c.Dynamic = dynamic
+		c.Mode = "theme"
 	})
 	if err := s.d.Save(); err != nil {
-		s.d.Logf("保存配置失败：%v", err)
+		s.d.Settings.Update(func(c *store.Settings) {
+			c.Theme = before.Theme
+			c.Dynamic = before.Dynamic
+			c.Pattern = before.Pattern
+			c.Mode = before.Mode
+		})
+		return err
+	}
+	if err := s.d.SwitchTheme(id, dynamic); err != nil {
+		s.d.Settings.Update(func(c *store.Settings) {
+			c.Theme = before.Theme
+			c.Dynamic = before.Dynamic
+			c.Pattern = before.Pattern
+			c.Mode = before.Mode
+		})
+		return errors.Join(err, s.d.Save())
 	}
 	s.Broadcast()
 	return nil
@@ -432,6 +445,7 @@ func (s *Server) handleBrightness(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	before := s.d.Settings.Snapshot().Bright
 	if req.Dot != nil || req.Keys != nil {
 		s.d.Settings.Update(func(st *store.Settings) {
 			if req.Dot != nil {
@@ -443,20 +457,14 @@ func (s *Server) handleBrightness(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := s.d.Save(); err != nil {
-		s.d.Logf("保存配置失败：%v", err)
+		s.d.Settings.Update(func(c *store.Settings) { c.Bright = before })
+		http.Error(w, "保存失败："+err.Error(), http.StatusInternalServerError)
+		return
 	}
-	// 亮度变化要重建场景才生效。
-	// 走 RebuildTheme（被动重建）：亮度滑杆是调参不是点主题,
-	// 用户在伴侣场景里拖滑杆,场景不该被踢回主题。
-	if s.d.RebuildTheme != nil {
-		if err := s.d.RebuildTheme(); err != nil {
-			s.d.Logf("按新亮度重建场景失败：%v", err)
-		}
-	} else if s.d.SwitchTheme != nil {
-		if err := s.d.SwitchTheme(s.curTheme(), s.curDynamic()); err != nil {
-			s.d.Logf("按新亮度重建场景失败：%v", err)
-		}
+	if s.d.ApplyOutput != nil {
+		s.d.ApplyOutput()
 	}
+	s.Broadcast()
 	writeJSON(w, http.StatusOK, s.state())
 }
 
@@ -535,6 +543,16 @@ func (s *Server) handlePomodoro(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	switch req.Action {
+	case "start", "pause", "resume", "skip", "reset":
+	default:
+		http.Error(w, "未知 action", 400)
+		return
+	}
+	if p := req.Preset; p != nil && (p.Focus <= 0 || p.Break <= 0 || p.LongBreak <= 0 || p.Every <= 0) {
+		http.Error(w, "番茄钟时长和循环次数必须大于零", 400)
+		return
+	}
 	now := time.Now()
 	if req.Preset != nil {
 		s.d.Pomodoro.SetPreset(engine.Preset{
@@ -569,8 +587,11 @@ func (s *Server) handlePomodoro(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		// 整个结构在锁内序列化：写方（同 handler 的 POST）并发改字段。
-		s.d.Settings.View(func(st *store.Settings) { writeJSON(w, http.StatusOK, st) })
+		writeJSON(w, http.StatusOK, s.d.Settings.Snapshot())
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 GET/POST", 405)
 		return
 	}
 	var req struct {
@@ -579,69 +600,96 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		TypingGuard *bool              `json:"typing_guard"`
 		RateTier    *int               `json:"rate_tier"`
 		IdleAgent   *string            `json:"idle_agent"`
+		Outputs     *struct {
+			Dot  *bool `json:"dot"`
+			Keys *bool `json:"keys"`
+		} `json:"outputs"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Calib != nil {
-		s.d.Settings.Update(func(st *store.Settings) { st.Calib = *req.Calib })
-		// 热更新：直接改运行中的校准,场景按新参数重建。
-		// 没有这条的话滑杆"已保存"但键盘纹丝不动 —— 要重启才生效。
-		if s.d.SetCalib != nil {
-			if err := s.d.SetCalib(*req.Calib); err != nil {
-				s.d.Logf("校准热更新失败：%v", err)
+	// 完整验证后一次发布，避免请求的后半段非法却已改动前半段。
+	if req.RateTier != nil && (*req.RateTier < 0 || *req.RateTier > 2) {
+		http.Error(w, "rate_tier 必须为 0..2", 400)
+		return
+	}
+	if c := req.Calib; c != nil {
+		if c.Corr < 0 || c.Corr > 1 || c.Sat < 0 || c.Sat > 3 || c.EQL < 0 || c.EQL > 255 {
+			http.Error(w, "校准参数超出范围", 400)
+			return
+		}
+		for _, g := range c.Gain {
+			if g < 0 || g > 3 {
+				http.Error(w, "增益必须为 0..3", 400)
+				return
 			}
 		}
 	}
-	if req.Idle != nil {
-		s.d.Settings.Update(func(st *store.Settings) { st.IdlePolicy = *req.Idle })
-		// 热更新省电阈值 —— 同上,不能让"熄屏策略"页变成假保存。
-		if s.d.SetIdlePolicy != nil {
-			s.d.SetIdlePolicy(*req.Idle)
-		}
-	}
-	if req.TypingGuard != nil {
-		s.d.Settings.Update(func(st *store.Settings) { st.TypingGuard = *req.TypingGuard })
-		if s.d.SetTypingGuard != nil {
-			s.d.SetTypingGuard(*req.TypingGuard)
-		}
-	}
-	if req.RateTier != nil {
-		t := *req.RateTier
-		if t < 0 || t > 2 {
-			http.Error(w, "rate_tier 只能是 0（默认）/ 1（流畅）/ 2（极速）", http.StatusBadRequest)
+	if i := req.Idle; i != nil {
+		if i.BlankSeconds < 0 || i.KeysOffPercent < 0 || i.KeysOffPercent > 100 || i.AllOffPercent < 0 || i.AllOffPercent > 100 || (i.KeysOffPercent > 0 && i.AllOffPercent > i.KeysOffPercent) {
+			http.Error(w, "熄屏阈值无效", 400)
 			return
-		}
-		s.d.Settings.Update(func(st *store.Settings) { st.RateTier = t })
-		if s.d.SetRateTier != nil {
-			s.d.SetRateTier(t)
 		}
 	}
 	if req.IdleAgent != nil {
-		// 空串 / "auto" = 跟随最近会话。注意不能先归一化：
-		// NormalizeName("") 会默认成 "claude-code"，把"清空"变成"选定"。
 		id := strings.TrimSpace(*req.IdleAgent)
 		if id == "auto" {
 			id = ""
 		}
 		if id != "" && id != "generic" {
 			id = agent.NormalizeName(id)
-			// "generic" 是页面上的"通用宝石"瓦片：不是内置形状,
-			// 但伴侣 resolve 会把任何不认得的 id 落成它,所以是合法值。
 			if _, ok := engine.BuiltinShapes()[id]; !ok {
-				http.Error(w, fmt.Sprintf("没有形状 %q，空闲展示只能选已收录的工具", id), http.StatusBadRequest)
+				http.Error(w, "没有形状 "+id, 400)
 				return
 			}
 		}
-		s.d.Settings.Update(func(st *store.Settings) { st.IdleAgent = id })
-		if s.d.SetIdleAgent != nil {
-			s.d.SetIdleAgent(id)
+		*req.IdleAgent = id
+	}
+	before := s.d.Settings.Snapshot()
+	s.d.Settings.Update(func(c *store.Settings) {
+		if req.Calib != nil {
+			c.Calib = *req.Calib
 		}
-	}
+		if req.Idle != nil {
+			c.IdlePolicy = *req.Idle
+		}
+		if req.TypingGuard != nil {
+			c.TypingGuard = *req.TypingGuard
+		}
+		if req.RateTier != nil {
+			c.RateTier = *req.RateTier
+		}
+		if req.IdleAgent != nil {
+			c.IdleAgent = *req.IdleAgent
+		}
+		if req.Outputs != nil {
+			if req.Outputs.Dot != nil {
+				c.Outputs.Dot = *req.Outputs.Dot
+			}
+			if req.Outputs.Keys != nil {
+				c.Outputs.Keys = *req.Outputs.Keys
+			}
+		}
+	})
 	if err := s.d.Save(); err != nil {
-		s.d.Logf("保存配置失败：%v", err)
+		s.d.Settings.Update(func(c *store.Settings) { c.Config = before })
+		http.Error(w, "保存失败："+err.Error(), 500)
+		return
 	}
-	writeJSON(w, http.StatusOK, s.d.Settings)
+	if s.d.ApplyOutput != nil {
+		s.d.ApplyOutput()
+	}
+	if req.Idle != nil && s.d.SetIdlePolicy != nil {
+		s.d.SetIdlePolicy(*req.Idle)
+	}
+	if req.TypingGuard != nil && s.d.SetTypingGuard != nil {
+		s.d.SetTypingGuard(*req.TypingGuard)
+	}
+	if req.IdleAgent != nil && s.d.SetIdleAgent != nil {
+		s.d.SetIdleAgent(*req.IdleAgent)
+	}
+	s.Broadcast()
+	writeJSON(w, http.StatusOK, s.d.Settings.Snapshot())
 }
 
 // handlePing 是后端健康检查端点：返回 yogod 签名。
@@ -716,17 +764,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // ── 工具 ──────────────────────────────────────────────────────────
 
-func (s *Server) curTheme() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.themeID
-}
-
-func (s *Server) curDynamic() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.dynamic
-}
+func (s *Server) curTheme() string { return s.d.Settings.Snapshot().Theme }
+func (s *Server) curDynamic() bool { return s.d.Settings.Snapshot().Dynamic }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	b, err := json.Marshal(v)
@@ -766,43 +805,52 @@ func clampF(v, lo, hi float64) float64 {
 
 // ── SSE ───────────────────────────────────────────────────────────
 
+type subscription struct {
+	ready        chan struct{}
+	state, frame []byte
+}
 type hub struct {
 	mu   sync.Mutex
-	subs map[chan []byte]struct{}
+	subs map[*subscription]struct{}
 }
 
-func newHub() *hub { return &hub{subs: map[chan []byte]struct{}{}} }
-
-func (h *hub) add() chan []byte {
-	ch := make(chan []byte, 16)
+func newHub() *hub { return &hub{subs: map[*subscription]struct{}{}} }
+func (h *hub) add() *subscription {
+	sub := &subscription{ready: make(chan struct{}, 1)}
 	h.mu.Lock()
-	h.subs[ch] = struct{}{}
+	h.subs[sub] = struct{}{}
 	h.mu.Unlock()
-	return ch
+	return sub
 }
-
-func (h *hub) remove(ch chan []byte) {
-	h.mu.Lock()
-	if _, ok := h.subs[ch]; ok {
-		delete(h.subs, ch)
-		close(ch)
-	}
-	h.mu.Unlock()
-}
-
+func (h *hub) remove(sub *subscription) { h.mu.Lock(); delete(h.subs, sub); h.mu.Unlock() }
 func (h *hub) send(msg []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for ch := range h.subs {
+	state := strings.HasPrefix(string(msg), "event: state")
+	for sub := range h.subs {
+		if state {
+			sub.state = msg
+		} else {
+			sub.frame = msg
+		}
 		select {
-		case ch <- msg:
-		default: // 订阅者跟不上就丢这一条，绝不阻塞出帧
+		case sub.ready <- struct{}{}:
+		default:
 		}
 	}
+}
+func (h *hub) take(sub *subscription) (state, frame []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state, frame = sub.state, sub.frame
+	sub.state, sub.frame = nil, nil
+	return
 }
 
 // Broadcast 推送一次全量状态。
 func (s *Server) Broadcast() {
+	s.broadcastMu.Lock()
+	defer s.broadcastMu.Unlock()
 	st := s.state()
 	if b, err := json.Marshal(st); err == nil {
 		s.hub.send(append([]byte("event: state\ndata: "), append(b, '\n', '\n')...))
@@ -832,11 +880,17 @@ func (s *Server) RunPreview(ctx context.Context, every time.Duration) {
 	defer t.Stop()
 
 	var lastM, lastK string
+	var lastOutput engine.OutputStatus
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			status := s.d.Engine.Status()
+			if status != lastOutput {
+				lastOutput = status
+				s.Broadcast()
+			}
 			ms, ks, ok := s.currentFrame()
 			if !ok || (ms == lastM && ks == lastK) {
 				continue
@@ -858,6 +912,8 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
 
 	ch := s.hub.add()
 	defer s.hub.remove(ch)
@@ -879,15 +935,20 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case msg, ok := <-ch:
-			if !ok {
-				return
-			}
-			if _, err := w.Write(msg); err != nil {
-				return
+		case <-ch.ready:
+			_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			state, frame := s.hub.take(ch)
+			// 分别保留最新状态与最新画面，慢客户端不会被历史帧淹没。
+			for _, msg := range [][]byte{state, frame} {
+				if len(msg) > 0 {
+					if _, err := w.Write(msg); err != nil {
+						return
+					}
+				}
 			}
 			flusher.Flush()
 		case <-ka.C:
+			_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if _, err := fmt.Fprint(w, ": ka\n\n"); err != nil {
 				return
 			}
@@ -911,7 +972,7 @@ func (s *Server) ListenAndServe(addr string) error {
 // Serve 在一个已经绑好的监听器上提供服务，直到该监听器出错。
 func (s *Server) Serve(ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           s.mux,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		// 不要 WriteTimeout：SSE 是长连接
 	}

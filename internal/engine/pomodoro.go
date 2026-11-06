@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"math"
 	"sync"
 	"time"
@@ -9,7 +8,6 @@ import (
 	"github.com/wednesque/yogod/internal/color"
 	"github.com/wednesque/yogod/internal/device"
 	"github.com/wednesque/yogod/internal/frame"
-	"github.com/wednesque/yogod/internal/proto"
 )
 
 func sin(x float64) float64  { return math.Sin(x) }
@@ -267,7 +265,7 @@ func (p *Pomodoro) IsAlerting() bool {
 func (p *Pomodoro) Name() string { return "pomodoro" }
 
 // Frame 实现 Scene。
-func (p *Pomodoro) Frame(t time.Duration) Render {
+func (p *Pomodoro) Frame(t time.Duration, ch Channels) Picture {
 	p.mu.Lock()
 	now := time.Now()
 	phase := p.phase
@@ -292,37 +290,32 @@ func (p *Pomodoro) Frame(t time.Duration) Render {
 
 	switch phase {
 	case PhaseAlert, PhaseBreakAlert:
-		g = tomatoFrame(sec)
-		l = alertKeys(sec, phase)
+		if ch.Matrix {
+			g = tomatoFrame(sec)
+		}
+		if ch.Keys {
+			l = alertKeys(sec, phase)
+		}
 	default:
-		g = ringFrame(sec, progress, phase == PhaseBreak)
-		l = barKeys(progress, phase == PhaseBreak)
+		if ch.Matrix {
+			g = ringFrame(sec, progress, phase == PhaseBreak)
+		}
+		if ch.Keys {
+			l = barKeys(progress, phase == PhaseBreak)
+		}
 	}
 
-	m := g.EncodeAnimated(color.DefaultCalibration(), 50, false)
-	k := l.Encode(color.DefaultCalibration(), 70)
-	// 预览帧直通原色：校准和亮度都是灯珠的电气补偿，页面显示原始颜色。
-	pm := g.Encode(color.DefaultCalibration(), 100, false)
-	pk := frame.RawKeys(l, 100)
-	return Render{Matrix: &m, Keys: &k, PrevMatrix: &pm, PrevKeys: &pk}
+	var r Picture
+	if ch.Matrix {
+		r.Matrix = &g
+	}
+	if ch.Keys {
+		r.Keys = &l
+	}
+	return r
 }
-
-// Enter 实现 Scene：番茄钟要同时接管点阵和键盘。
-func (p *Pomodoro) Enter(ctx context.Context, ctrl *device.Controller) error {
-	patch := proto.Patch{
-		proto.OffBLMode:     proto.BLModeStream,
-		proto.OffBLBright:   90,
-		proto.OffBLColorful: 0,
-	}
-	for k, v := range proto.DotModePatch(proto.DotModeCustom, u8(90), u8(3), nil, nil, nil) {
-		patch[k] = v
-	}
-	_, err := ctrl.PatchConfig(ctx, patch)
-	return err
-}
-
-// Exit 实现 Scene。
-func (p *Pomodoro) Exit(context.Context, *device.Controller) {}
+func (*Pomodoro) Animation() Channels { return Channels{true, true} }
+func (*Pomodoro) Mode() device.Mode   { return device.Mode{Matrix: true, Keys: true, Effect: -1} }
 
 // ringFrame 画进度环：外圈 20 格随进度点亮，中间一块随呼吸明暗。
 func ringFrame(t, progress float64, isBreak bool) frame.Grid {

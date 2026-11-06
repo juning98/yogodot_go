@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wednesque/yogod/internal/device"
@@ -39,9 +40,6 @@ func (a Action) String() string {
 const (
 	// IdleBlankAfter 是"多久没碰键鼠就熄屏"。键盘自己的休眠是 900 秒，我们比它早一步。
 	IdleBlankAfter = 180 * time.Second
-	// RebBlankEvery 是熄着的时候定期补一帧全黑：
-	// 固件在一段时间收不到点阵帧后会退出同步态、把存储的画面重画回来。
-	ReblankEvery = 15 * time.Second
 	// BattKeysOff 是低于这个电量就不再推键盘灯（84 颗灯是耗电大头）。
 	BattKeysOff = 20
 	// BattAllOff 是低于这个电量连点阵也停，把电留给打字。
@@ -127,7 +125,7 @@ func DecidePolicy(in Inputs, p Policy) Action {
 
 // PowerMonitor 轮询系统状态并给出当前处置。
 //
-// 它不负责"怎么灭"——那由引擎把 Render 换成全黑帧完成。
+// 它不负责"怎么灭"——引擎分别切换两路输出，设备工作循环写一次黑帧后停止刷新。
 type PowerMonitor struct {
 	// LockFn 报告系统是否锁屏。注入是为了可测。
 	LockFn func() bool
@@ -138,12 +136,12 @@ type PowerMonitor struct {
 	// Logf 是日志出口。
 	Logf func(format string, args ...any)
 
-	mu          sync.Mutex
-	lockHits    int
-	locked      bool
-	action      Action
-	pol         Policy
-	lastReblank time.Time
+	mu       sync.Mutex
+	lockHits int
+	locked   bool
+	action   atomic.Uint32 // 后台发布，渲染侧只读最近一次结果
+	pol      Policy
+	OnChange func()
 }
 
 // SetPolicy 热更新省电阈值（控制台"熄屏策略"改动时调用）。
@@ -155,19 +153,11 @@ func (m *PowerMonitor) SetPolicy(p Policy) {
 
 // Poll 更新一次状态。
 func (m *PowerMonitor) Poll() Action {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// 系统查询和电量读取在后台完成，不占用状态快照的锁。
+	var locked bool
 	if m.LockFn != nil {
-		if m.LockFn() {
-			m.lockHits++
-		} else {
-			m.lockHits = 0
-		}
-		// 连续命中才当真：UAC 弹窗也会让检测失败
-		m.locked = m.lockHits >= LockDebounce
+		locked = m.LockFn()
 	}
-
 	var idle time.Duration
 	if m.IdleFn != nil {
 		idle = time.Duration(m.IdleFn() * float64(time.Second))
@@ -177,22 +167,36 @@ func (m *PowerMonitor) Poll() Action {
 		pw = m.PowerFn()
 	}
 
-	next := DecidePolicy(Inputs{Locked: m.locked, Idle: idle, Power: pw}, m.pol)
-	if next != m.action {
-		if m.Logf != nil {
-			m.Logf("省电状态 %v -> %v（锁屏=%v 空闲=%s）", m.action, next, m.locked, idle.Round(time.Second))
+	m.mu.Lock()
+	if m.LockFn != nil {
+		if locked {
+			m.lockHits++
+		} else {
+			m.lockHits = 0
 		}
-		m.action = next
-		m.lastReblank = time.Time{} // 状态刚变，立刻执行一次
+		// 连续命中才当真：UAC 弹窗也会让检测失败
+		m.locked = m.lockHits >= LockDebounce
 	}
-	return m.action
+
+	next := DecidePolicy(Inputs{Locked: m.locked, Idle: idle, Power: pw}, m.pol)
+	prev := m.Action()
+	if next != prev {
+		m.action.Store(uint32(next))
+	}
+	locked = m.locked
+	m.mu.Unlock()
+	if next != prev && m.OnChange != nil {
+		m.OnChange()
+	}
+	if next != prev && m.Logf != nil {
+		m.Logf("省电状态 %v -> %v（锁屏=%v 空闲=%s）", prev, next, locked, idle.Round(time.Second))
+	}
+	return next
 }
 
-// Action 返回上一次 Poll 的结果。
+// Action 只读最近一次发布的结果，不等待后台轮询。
 func (m *PowerMonitor) Action() Action {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.action
+	return Action(m.action.Load())
 }
 
 // Run 以固定间隔轮询，直到 ctx 取消。
@@ -214,21 +218,4 @@ func (m *PowerMonitor) Run(ctx context.Context, every time.Duration) {
 			m.Poll()
 		}
 	}
-}
-
-// ShouldEmit 报告这一 tick 是否该输出（而不是被熄屏吞掉）。
-//
-// 熄屏期间每隔 ReblankEvery 放一帧全黑出去 —— 目的不是画面，
-// 而是防止固件自己把存储的画面重画回来。
-func (m *PowerMonitor) ShouldEmit(now time.Time) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.action == KeepOn {
-		return true
-	}
-	if now.Sub(m.lastReblank) >= ReblankEvery {
-		m.lastReblank = now
-		return true
-	}
-	return false
 }

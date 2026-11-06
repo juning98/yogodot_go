@@ -8,6 +8,7 @@ import (
 
 	"github.com/wednesque/yogod/internal/frame"
 	"github.com/wednesque/yogod/internal/proto"
+	"github.com/wednesque/yogod/internal/store"
 )
 
 // kbCtx 给兼容层里的一次设备操作一个上限。
@@ -80,7 +81,7 @@ func (s *Server) handleCompat(w http.ResponseWriter, r *http.Request, path strin
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "connected": st.Connected, "awake": st.Awake,
 			"product": st.Product, "wired": st.Wired, "err": st.Error,
-			"power": st.Power, "dropped": st.Dropped,
+			"power":   st.Power,
 			"blanked": false, "locked": false, "idle": 0,
 			"via": false, "anim": false,
 		})
@@ -170,6 +171,10 @@ func (s *Server) handleCompat(w http.ResponseWriter, r *http.Request, path strin
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "awake": true, "cfg": cfgArray(cfg)})
 
 	case "/kb/matrix":
+		if !s.d.Engine.Enabled().Matrix {
+			http.Error(w, "点阵已关闭", 409)
+			return
+		}
 		arr, ok := get("rgb").([]any)
 		if !ok || len(arr) < frame.MatrixLen {
 			http.Error(w, "rgb 需要 108 个数", http.StatusBadRequest)
@@ -179,12 +184,16 @@ func (s *Server) handleCompat(w http.ResponseWriter, r *http.Request, path strin
 		for i := 0; i < frame.MatrixLen; i++ {
 			m[i] = byte(toInt(arr[i]))
 		}
-		res, err := dev.SendMatrix(ctx, m)
+		err := dev.SendMatrix(ctx, m)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": err == nil, "awake": dev.Awake(), "sent": res.Sent, "why": res.Reason,
+			"ok": err == nil, "awake": dev.Awake(), "sent": err == nil, "why": errorText(err),
 		})
 
 	case "/kb/keys":
+		if !s.d.Engine.Enabled().Keys {
+			http.Error(w, "背光已关闭", 409)
+			return
+		}
 		arr, ok := get("rgb565").([]any)
 		if !ok || len(arr) < frame.KeysLen {
 			http.Error(w, "rgb565 需要 168 个数", http.StatusBadRequest)
@@ -194,14 +203,20 @@ func (s *Server) handleCompat(w http.ResponseWriter, r *http.Request, path strin
 		for i := 0; i < frame.KeysLen; i++ {
 			k[i] = byte(toInt(arr[i]))
 		}
-		res, err := dev.SendKeys(ctx, k)
+		err := dev.SendKeys(ctx, k)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": err == nil, "awake": dev.Awake(), "sent": res.Sent, "why": res.Reason,
+			"ok": err == nil, "awake": dev.Awake(), "sent": err == nil, "why": errorText(err),
 		})
 
 	case "/kb/stopkeys":
-		_, _ = dev.PatchConfig(ctx, proto.Patch{proto.OffBLMode: 0})
-		dev.ForgetKeys()
+		s.d.Settings.Update(func(c *store.Settings) { c.Outputs.Keys = false })
+		if err := s.d.Save(); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if s.d.ApplyOutput != nil {
+			s.d.ApplyOutput()
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 
 	case "/kb/lightbuf", "/kb/anim", "/kb/anim/stop":
@@ -257,4 +272,11 @@ func decodeLoose(r *http.Request, v *map[string]any) error {
 	defer r.Body.Close()
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
 	return dec.Decode(v)
+}
+
+func errorText(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }

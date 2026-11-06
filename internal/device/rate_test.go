@@ -33,18 +33,3 @@ func TestRateTierUnknownFallsBackToDefault(t *testing.T) {
 		}
 	}
 }
-
-// SetRateTier 要真的写进控制器；RateGaps 读回来必须一致。
-func TestSetRateTierRoundTrip(t *testing.T) {
-	c := &Controller{}
-	c.SetRateTier(RateTierExtreme)
-	m, k := c.RateGaps()
-	if m != 67*time.Millisecond || k != 40*time.Millisecond {
-		t.Errorf("极速档 = (%v, %v)，期望 (67ms, 40ms)", m, k)
-	}
-	c.SetRateTier(RateTierDefault)
-	m, k = c.RateGaps()
-	if m != MinMatrixGap || k != MinKeysGap {
-		t.Error("回到默认档后应恢复常量值")
-	}
-}

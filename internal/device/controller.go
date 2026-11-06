@@ -1,4 +1,4 @@
-// Package device 是键盘的逻辑设备层：协议事务、限速、去重、补发。
+// Package device 管理键盘协议与单一设备工作循环。
 //
 // 分工：
 //
@@ -6,15 +6,10 @@
 //	internal/proto   报文长什么样、命令号是什么（纯函数）
 //	internal/device  一条命令怎么发、多久发一次、发不出去怎么办（本包）
 //	internal/engine  该显示什么（场景、动画、熄屏策略）
-//
-// 这一层是旧版 kbd.py 的对应物，但修掉了两个结构性问题：
-//
-//  1. 写操作返回 Result 而不是 void —— 上层能知道"到底发出去没有"，
-//     再也不用猜"设备为什么不动"。
-//  2. 限速只在这里，出帧者按自己的节拍出 —— 不再是"页面狂推、这里丢弃"。
 package device
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,11 +40,6 @@ const (
 	// 更高的档位见 RateTier，用户可在控制台切换。
 	MinMatrixGap = 160 * time.Millisecond
 	MinKeysGap   = 100 * time.Millisecond
-	// SameMatrixHold 是"画面没变"时补推的时间（图在设备里不会自己丢）。
-	SameMatrixHold = 30 * time.Minute
-	// SameKeysHold 是键盘灯静态画面的补推间隔。
-	SameKeysHold = 60 * time.Minute
-
 	// ConnectTimeout 是单次打开口的超时。
 	ConnectTimeout = 900 * time.Millisecond
 )
@@ -88,37 +78,6 @@ func (t RateTier) Gaps() (matrix, keys time.Duration) {
 	}
 }
 
-// SetRateTier 应用推帧档位。热切换链路后依然生效（swap 不重置非零值）。
-func (c *Controller) SetRateTier(t RateTier) {
-	m, k := t.Gaps()
-	c.mu.Lock()
-	c.minMatrixGap, c.minKeysGap = m, k
-	c.mu.Unlock()
-}
-
-// RateGaps 返回当前生效的点阵/键灯帧间隔（诊断与测试用）。
-func (c *Controller) RateGaps() (matrix, keys time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.minMatrixGap, c.minKeysGap
-}
-
-// Result 是一次写操作的结果。
-//
-// 有了它，上层不必再猜"为什么屏幕不动"：被限速、被去重、正在打字、
-// 还是设备根本没答话，Reason 里写得很清楚。
-type Result struct {
-	// Sent 表示这一帧真的写进设备了。
-	Sent bool
-	// Reason 在 Sent 为 false 时说明原因：
-	// "throttled" / "deduped" / "typing" / "disconnected"。
-	// （"blanked"/"error" 是废弃草稿，实现从不产出这两种。）
-	Reason string
-}
-
-// Sent 是一个成功结果的简写。
-var okSent = Result{Sent: true}
-
 // Power 是电量与供电状态。
 //
 // json tag 不能省：这个结构会原样进 /api/state，
@@ -142,27 +101,20 @@ type Status struct {
 	Wired     bool   `json:"wired"`
 	Error     string `json:"error"`
 	Power     *Power `json:"power"`
-	// Dropped 是被限速/去重挡下的帧数，纯统计。
-	Dropped uint64 `json:"dropped"`
-	// Sent 是真正写进设备的帧数（点阵 + 键盘各算一次）。
-	// 它长时间不涨，就说明键盘没在更新 —— 这是"看着不动"时第一个该看的数。
-	Sent uint64 `json:"sent"`
-	// DropBy 按原因分开记被挡下的次数：
-	// typing（打字让路）/ deduped（画面没变）/ throttled（限速）。
-	// 光看总数分不清"键盘没动"到底是没内容还是被挡住。
-	DropBy map[string]uint64 `json:"dropBy,omitempty"`
 }
 
 // Controller 拥有唯一一条到键盘的连接。
 //
 // 所有导出方法都是并发安全的。
-type Controller struct {
-	// Typing 由外部注入：最近 250ms 内有没有按键。
-	// nil 表示不做打字让路。
-	Typing func() bool
+type deviceLink interface {
+	Write(context.Context, []byte) error
+	Read(context.Context, time.Duration) ([]byte, error)
+	Close() error
+}
 
-	mu   sync.Mutex // 串行化命令事务
-	link *hid.Link
+type Controller struct {
+	mu   sync.Mutex // 保护短时状态快照；设备事务由工作循环串行执行
+	link deviceLink
 	info hid.Interface
 	seq  proto.SeqRing
 
@@ -174,28 +126,17 @@ type Controller struct {
 	lastCfg  proto.Config
 	power    *Power
 	powerAt  time.Time
-	dropped  uint64
-	sent     uint64
-	dropBy   map[string]uint64
 	closed   bool
 	stopRead chan struct{}
 	readDone chan struct{}
 
-	// 上一帧内容与时间，用来做去重和限速。
-	haveMatrix   bool
-	lastMatrix   frame.Matrix
-	lastMatrixAt time.Time
-	// 被限速挡下、待补发的那一帧（只留最新的，画面是状态而不是队列）。
-	matrixPending *frame.Matrix
+	workOnce    sync.Once
+	work        chan func()
+	workStop    chan struct{}
+	stopOnce    sync.Once
+	generation  atomic.Uint64
+	appliedMode *Mode // 仅设备工作循环读写
 
-	haveKeys    bool
-	lastKeys    frame.Keys
-	lastKeysAt  time.Time
-	keysPending *frame.Keys
-
-	// 限速帧间隔（用户档位，SetRateTier 调整；零值时 attach 补默认）。
-	minMatrixGap time.Duration
-	minKeysGap   time.Duration
 }
 
 // packetGap 是同一帧内包与包之间的空隙。
@@ -227,7 +168,7 @@ func Open(ctx context.Context) (*Controller, error) {
 		if spare == nil {
 			spare = c // 都不应答：留一个兜底，等键盘醒过来
 		} else {
-			c.Close()
+			c.close()
 		}
 	}
 	if spare != nil {
@@ -263,17 +204,12 @@ func (c *Controller) attach(it hid.Interface) error {
 
 	c.mu.Lock()
 	c.link = l
+	c.generation.Add(1)
+	c.appliedMode = nil
 	c.info = info
 	c.pending = make(map[byte]chan []byte)
 	c.stopRead = make(chan struct{})
 	c.readDone = make(chan struct{})
-	// 限速档只在零值时补默认：SetRateTier 设的档位要活过热切换（swap 也走这里）
-	if c.minMatrixGap == 0 {
-		c.minMatrixGap = MinMatrixGap
-	}
-	if c.minKeysGap == 0 {
-		c.minKeysGap = MinKeysGap
-	}
 	done := c.readDone
 	c.mu.Unlock()
 
@@ -314,42 +250,23 @@ func (c *Controller) Awake() bool {
 func (c *Controller) Status() Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	var power *Power
+	if c.power != nil {
+		p := *c.power
+		power = &p
+	}
 	return Status{
 		Connected: c.link != nil && !c.closed,
 		Awake:     c.awake,
 		Product:   c.info.Product,
 		Wired:     !c.info.IsDongle(),
 		Error:     c.lastErr,
-		Power:     c.power,
-		Dropped:   c.dropped,
-		Sent:      atomic.LoadUint64(&c.sent),
-		DropBy:    copyCounts(c.dropBy),
+		Power:     power,
 	}
-}
-
-// dropLocked 记一笔"这一帧没发出去"的账。调用方必须持有 c.mu。
-func (c *Controller) dropLocked(reason string) {
-	c.dropped++
-	if c.dropBy == nil {
-		c.dropBy = make(map[string]uint64, 4)
-	}
-	c.dropBy[reason]++
-}
-
-// copyCounts 复制一份计数，避免把内部 map 交给外部。
-func copyCounts(src map[string]uint64) map[string]uint64 {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make(map[string]uint64, len(src))
-	for k, v := range src {
-		out[k] = v
-	}
-	return out
 }
 
 // Close 关闭连接。可重复调用。
-func (c *Controller) Close() error {
+func (c *Controller) close() error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -398,7 +315,7 @@ func VendorPaths() ([]string, error) {
 //   - 旧口自己复活了 → 保留旧连接（同口恢复画面最连贯）
 //   - 都没应答 → 旧口还在枚举里就保留旧连接（键盘可能只是睡了）；
 //     旧口已消失就占住一个口，等键盘醒过来
-func (c *Controller) Reopen(ctx context.Context) error {
+func (c *Controller) reopen(ctx context.Context) error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -414,7 +331,7 @@ func (c *Controller) Reopen(ctx context.Context) error {
 	if len(ifaces) == 0 {
 		return fmt.Errorf("device: 没找到键盘或接收器（VID %04X, FF60/61）", hid.VID)
 	}
-	// 旧口还在就第一个试：同口恢复不用动任何状态
+	// 优先探测原接口，确认应答后重新建立会话。
 	for i := range ifaces {
 		if ifaces[i].Path == oldPath {
 			ifaces[0], ifaces[i] = ifaces[i], ifaces[0]
@@ -428,18 +345,11 @@ func (c *Controller) Reopen(ctx context.Context) error {
 			continue
 		}
 		if !n.ping(ctx) {
-			n.Close()
+			n.close()
 			continue
 		}
-		n.Close()
-		if it.Path == oldPath {
-			// 旧口复活：之前的失败是瞬时的，清掉错误继续用
-			c.mu.Lock()
-			c.awake = true
-			c.lastErr = ""
-			c.mu.Unlock()
-			return nil
-		}
+		n.close()
+		// 即使路径没变也重建读循环；旧句柄的读循环可能已经退出。
 		return c.swap(it, true)
 	}
 
@@ -456,8 +366,7 @@ func (c *Controller) Reopen(ctx context.Context) error {
 // swap 拆掉当前连接，把控制器装到新接口上。awake 传入这次切换后
 // 设备是否应答应答（Reopen 选口时刚 ping 过）。
 //
-// 去重/限速/电量缓存全部作废 —— 新链路后面的固件状态不可信，
-// 由上层 Invalidate 之后从零重推。
+// 新链路的配置与电量缓存作废；连接代数变化通知引擎重放当前目标。
 func (c *Controller) swap(it hid.Interface, awake bool) error {
 	c.mu.Lock()
 	old := c.link
@@ -488,9 +397,6 @@ func (c *Controller) swap(it hid.Interface, awake bool) error {
 	}
 	c.power, c.powerAt = nil, time.Time{}
 	c.haveCfg = false
-	c.haveMatrix, c.haveKeys = false, false
-	c.matrixPending, c.keysPending = nil, nil
-	c.lastMatrixAt, c.lastKeysAt = time.Time{}, time.Time{}
 	c.lastHand = time.Time{}
 	c.mu.Unlock()
 	return nil
@@ -633,7 +539,7 @@ func (c *Controller) ping(ctx context.Context) bool {
 }
 
 // EndDotSync 结束固件点阵同步会话。官方自定义播放在设置模式 6 前执行此操作。
-func (c *Controller) EndDotSync(ctx context.Context) error {
+func (c *Controller) endDotSync(ctx context.Context) error {
 	c.handshake(ctx)
 	b, err := c.transact(ctx, proto.New(proto.CmdEndSyncDot, 0, nil), true)
 	if err != nil {
@@ -648,7 +554,7 @@ func (c *Controller) EndDotSync(ctx context.Context) error {
 // ReadConfig 读完整的 64 字节配置。
 //
 // 键盘刚醒时第一次多半没人应答，所以重试三次并强制重新握手。
-func (c *Controller) ReadConfig(ctx context.Context) (proto.Config, error) {
+func (c *Controller) readConfig(ctx context.Context) (proto.Config, error) {
 	var cfg proto.Config
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -698,7 +604,7 @@ func (c *Controller) ReadConfig(ctx context.Context) (proto.Config, error) {
 }
 
 // WriteConfig 写完整的 64 字节配置。
-func (c *Controller) WriteConfig(ctx context.Context, cfg proto.Config) error {
+func (c *Controller) writeConfig(ctx context.Context, cfg proto.Config) error {
 	c.handshake(ctx)
 	// 进/出同步会话前先收尾，官方也是这么做的
 	_, _ = c.transact(ctx, proto.New(proto.CmdEndSyncLED, 0, nil), false)
@@ -717,12 +623,12 @@ func (c *Controller) WriteConfig(ctx context.Context, cfg proto.Config) error {
 }
 
 // PatchConfig 读-改-写，只动指定字节。
-func (c *Controller) PatchConfig(ctx context.Context, patch proto.Patch) (proto.Config, error) {
+func (c *Controller) patchConfig(ctx context.Context, patch proto.Patch) (proto.Config, error) {
 	if err := proto.CheckPatch(patch); err != nil {
 		return proto.Config{}, err
 	}
 
-	cfg, err := c.ReadConfig(ctx)
+	cfg, err := c.readConfig(ctx)
 	if err != nil {
 		return proto.Config{}, err
 	}
@@ -733,9 +639,26 @@ func (c *Controller) PatchConfig(ctx context.Context, patch proto.Patch) (proto.
 		// 上面是每次实读，配置不一致时这里一定不相等。
 		return cfg, nil
 	}
-	if err := c.WriteConfig(ctx, out); err != nil {
-		return proto.Config{}, err
+	// 背光与点阵位于不同配置分段。只写变化段，点阵操作不结束背光同步。
+	// 最后一段仍须发送：固件用配置区末尾的写入提交整次修改。
+	if !bytes.Equal(cfg[:24], out[:24]) {
+		if _, err := c.transact(ctx, proto.New(proto.CmdEndSyncLED, 0, nil), false); err != nil {
+			return proto.Config{}, err
+		}
 	}
+	for _, ck := range proto.ConfigChunks {
+		end := int(ck.Offset) + int(ck.Length)
+		if end != proto.ConfigLen && bytes.Equal(cfg[ck.Offset:end], out[ck.Offset:end]) {
+			continue
+		}
+		if _, err := c.transact(ctx, proto.NewLen(proto.CmdWriteConfig, ck.Offset, ck.Length, out[ck.Offset:end]), false); err != nil {
+			return proto.Config{}, err
+		}
+	}
+	c.mu.Lock()
+	c.lastCfg = out
+	c.haveCfg = true
+	c.mu.Unlock()
 	return out, nil
 }
 
@@ -747,7 +670,7 @@ func (c *Controller) Config() (proto.Config, bool) {
 }
 
 // Power 读电量与供电状态。内部有 30 秒缓存。
-func (c *Controller) Power(ctx context.Context, force bool) (*Power, error) {
+func (c *Controller) powerInfo(ctx context.Context, force bool) (*Power, error) {
 	c.mu.Lock()
 	if !force && c.power != nil && time.Since(c.powerAt) < PowerEvery {
 		p := *c.power
@@ -768,7 +691,7 @@ func (c *Controller) Power(ctx context.Context, force bool) (*Power, error) {
 		if p == nil {
 			return nil, errors.New("device: 读不到电量")
 		}
-		return p, nil // 读不到就沿用上一次，别把界面清空
+		return p, errors.New("device: 电量查询未应答")
 	}
 
 	pct := int(b[0])
@@ -795,53 +718,6 @@ func (c *Controller) Power(ctx context.Context, force bool) (*Power, error) {
 
 // ── 帧推送 ────────────────────────────────────────────────────────
 
-// SendMatrix 推一帧点阵。108 字节 RGB888，分 5 包。
-//
-// 语义与旧版一致，但把"被挡下"的原因明确回给调用方：
-//   - 被限速/去重/打字挡下 → 记成待补发，返回 Result{Sent:false}
-//   - 真的写进设备 → Result{Sent:true}
-//
-// 不丢帧是有意的：动画丢一帧无所谓，但模式切换（比如切到专注要全黑）
-// 也是一次推送，丢了就永远留在上一张图上 —— 表现成"点了没反应"。
-func (c *Controller) SendMatrix(ctx context.Context, m frame.Matrix) (Result, error) {
-	c.mu.Lock()
-	if c.link == nil || c.closed {
-		c.mu.Unlock()
-		return Result{Reason: "disconnected"}, ErrNotConnected
-	}
-	now := time.Now()
-	same := c.haveMatrix && c.lastMatrix == m
-	gap := now.Sub(c.lastMatrixAt)
-	hold := SameMatrixHold
-	typing := c.Typing != nil && c.Typing()
-
-	switch {
-	case typing:
-		c.matrixPending = &m
-		c.dropLocked("typing")
-		c.mu.Unlock()
-		return Result{Reason: "typing"}, nil
-	case same && gap < hold:
-		c.matrixPending = nil
-		c.dropLocked("deduped")
-		c.mu.Unlock()
-		return Result{Reason: "deduped"}, nil
-	case gap < c.minMatrixGap:
-		c.matrixPending = &m
-		c.dropLocked("throttled")
-		c.mu.Unlock()
-		return Result{Reason: "throttled"}, nil
-	}
-	// 占住时间槽：并发进来的一律走待补发，不能各自再发一整帧
-	c.lastMatrixAt = now
-	c.lastMatrix = m
-	c.haveMatrix = true
-	c.matrixPending = nil
-	c.mu.Unlock()
-
-	return okSent, c.writeMatrix(ctx, m)
-}
-
 // writeMatrix 把一个 108 字节点阵帧拆包发出去。
 //
 // 分包细节（尤其是最后一片只有 12 字节有效）在 MatrixPackets 里，
@@ -861,47 +737,7 @@ func (c *Controller) writeMatrix(ctx context.Context, m frame.Matrix) error {
 			time.Sleep(gap)
 		}
 	}
-	atomic.AddUint64(&c.sent, 1)
 	return nil
-}
-
-// SendKeys 推一帧键盘灯。168 字节 RGB565 小端，分 7 包。
-// 前提是背光模式已经是 254（否则固件不接推流）。
-func (c *Controller) SendKeys(ctx context.Context, k frame.Keys) (Result, error) {
-	c.mu.Lock()
-	if c.link == nil || c.closed {
-		c.mu.Unlock()
-		return Result{Reason: "disconnected"}, ErrNotConnected
-	}
-	now := time.Now()
-	same := c.haveKeys && c.lastKeys == k
-	gap := now.Sub(c.lastKeysAt)
-	typing := c.Typing != nil && c.Typing()
-
-	switch {
-	case typing:
-		c.keysPending = &k
-		c.dropLocked("typing")
-		c.mu.Unlock()
-		return Result{Reason: "typing"}, nil
-	case same && gap < SameKeysHold:
-		c.keysPending = nil
-		c.dropLocked("deduped")
-		c.mu.Unlock()
-		return Result{Reason: "deduped"}, nil
-	case gap < c.minKeysGap:
-		c.keysPending = &k
-		c.dropLocked("throttled")
-		c.mu.Unlock()
-		return Result{Reason: "throttled"}, nil
-	}
-	c.lastKeysAt = now
-	c.lastKeys = k
-	c.haveKeys = true
-	c.keysPending = nil
-	c.mu.Unlock()
-
-	return okSent, c.writeKeys(ctx, k)
 }
 
 func (c *Controller) writeKeys(ctx context.Context, k frame.Keys) error {
@@ -914,68 +750,5 @@ func (c *Controller) writeKeys(ctx context.Context, k frame.Keys) error {
 			time.Sleep(packetGap)
 		}
 	}
-	atomic.AddUint64(&c.sent, 1)
 	return nil
-}
-
-// FlushPending 补发被限速/打字挡下的最新帧。
-//
-// 引擎按 30Hz 调用它即可 —— 内部自己判断间隔，没到点就直接返回。
-func (c *Controller) FlushPending(ctx context.Context) {
-	c.mu.Lock()
-	mp, kp := c.matrixPending, c.keysPending
-	now := time.Now()
-	canM := mp != nil && now.Sub(c.lastMatrixAt) >= c.minMatrixGap
-	canK := kp != nil && now.Sub(c.lastKeysAt) >= c.minKeysGap
-	typing := c.Typing != nil && c.Typing()
-	if typing {
-		c.mu.Unlock()
-		return // 打字优先，补发帧先等着
-	}
-	if canM {
-		c.lastMatrixAt = now
-		c.lastMatrix = *mp
-		c.haveMatrix = true
-		c.matrixPending = nil
-	}
-	if canK {
-		c.lastKeysAt = now
-		c.lastKeys = *kp
-		c.haveKeys = true
-		c.keysPending = nil
-	}
-	c.mu.Unlock()
-
-	if canM {
-		_ = c.writeMatrix(ctx, *mp)
-	}
-	if canK {
-		_ = c.writeKeys(ctx, *kp)
-	}
-}
-
-// ForgetKeys 背光交回固件（模式不是 254）时调用：忘掉手里那帧灯。
-//
-// 否则熄屏/恢复会把"关背光之前"的最后一帧主题配色推回去 ——
-// 逐键推流不管背光模式是不是 0，都照亮。
-func (c *Controller) ForgetKeys() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.haveKeys = false
-	c.lastKeys = frame.Keys{}
-	c.keysPending = nil
-}
-
-// Invalidateliveness 让"设备现在是什么模式"的确认作废。
-//
-// 引擎在链路事件、电量跳变、或回读对账不一致时调用它，
-// 下一次 Enter 场景就会重新写配置、重推画面。
-func (c *Controller) Invalidate() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.haveCfg = false
-	c.lastMatrixAt = time.Time{}
-	c.lastKeysAt = time.Time{}
-	c.haveMatrix = false
-	c.haveKeys = false
 }

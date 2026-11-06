@@ -188,6 +188,7 @@ func TestIdleAfterInactivity(t *testing.T) {
 	s.mu.Lock()
 	s.sessions["s1"].At = time.Now().Add(-16 * time.Minute).Unix()
 	s.mu.Unlock()
+	s.Prune(time.Now())
 
 	snap := s.Snapshot()
 	if len(snap.Sessions) != 1 {
@@ -206,6 +207,7 @@ func TestDropAfterLongInactivity(t *testing.T) {
 	s.mu.Lock()
 	s.sessions["s1"].At = time.Now().Add(-3 * time.Hour).Unix()
 	s.mu.Unlock()
+	s.Prune(time.Now())
 
 	if n := len(s.Snapshot().Sessions); n != 0 {
 		t.Fatalf("3 小时没动静应移除，实际还剩 %d 条", n)

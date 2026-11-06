@@ -26,7 +26,6 @@ func runEngine(ctx context.Context) error {
 	defer ctrl.Close()
 
 	// 打字让路：最近 250ms 内按过键，非必要帧先等着
-	ctrl.Typing = func() bool { return sys.RecentKeyInput(sys.TypingGuardMS) }
 	if err := sys.StartKeyHook(); err != nil {
 		logf("键盘钩子没装上，打字检测退回键鼠一起算：%v", err)
 	}
@@ -44,8 +43,8 @@ func runEngine(ctx context.Context) error {
 	}
 
 	eng := engine.New(ctrl, engine.Options{
-		Tick: time.Second / 30,
-		Logf: logf,
+		Tick:   time.Second / 30,
+		Typing: func() bool { return sys.RecentKeyInput(sys.TypingGuardMS) },
 	})
 
 	// 省电闸门：锁屏 / 离开 / 低电量
@@ -65,26 +64,16 @@ func runEngine(ctx context.Context) error {
 	}
 	eng.SetPower(pm)
 
-	scene := engine.NewThemeScene(t, true, deviceCal())
-	// liveness：连续 10 秒没真正写成功，就重进场景模式、重推当前画面。
-	// 这是对旧版"键盘睡了页面还在空转"的直接修补。
+	scene := engine.NewThemeScene(t, true)
 	eng.SetScene(ctx, scene)
-	eng.OnLiveness = func() {
-		logf("重新对账：重写设备模式")
-		ctrl.Invalidate()
-		if err := eng.SetScene(ctx, scene); err != nil {
-			logf("重进场景失败：%v", err)
-		}
-	}
 
 	go pm.Run(ctx, 2*time.Second)
 	go func() { _ = eng.Pump(ctx) }()
 	go func() { _ = eng.Drain(ctx) }()
-	go eng.WatchLiveness(ctx, 10*time.Second)
 
 	logf("引擎已启动：主题 %s（%s）", t.ID, t.Name)
 	<-ctx.Done()
-	logf("退出：共写入 %d 帧，丢弃/去重 %d 帧", eng.Sent(), eng.Dropped())
+	logf("引擎退出")
 	return nil
 }
 

@@ -74,8 +74,5 @@ func (c *Controller) ApplyFirmwareEffect(ctx context.Context, eff FirmwareEffect
 		patch[proto.OffBLColorful] = 1
 	}
 	_, err := c.PatchConfig(ctx, patch)
-	// 背光已经不是推流模式了，手里那帧灯必须作废，
-	// 否则下一次熄屏/恢复会把旧配色推回去，盖掉固件效果。
-	c.ForgetKeys()
 	return err
 }

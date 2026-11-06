@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -11,7 +10,6 @@ import (
 	"github.com/wednesque/yogod/internal/color"
 	"github.com/wednesque/yogod/internal/device"
 	"github.com/wednesque/yogod/internal/frame"
-	"github.com/wednesque/yogod/internal/proto"
 )
 
 // 状态色。
@@ -156,12 +154,12 @@ func (c *CompanionScene) Name() string { return "companion" }
 // resolve 算出"现在该显示谁、什么状态"，含完成/出错的 6 秒停留回退
 // 和空闲时的用户指定形状。
 func (c *CompanionScene) resolve() (name string, st agent.State) {
-	snap := c.Store.Snapshot()
+	topSnapshot := c.Store.Top()
 	st = agent.StateIdle
 	name = "generic"
 
-	if snap.Top != nil {
-		top := *snap.Top
+	if topSnapshot != nil {
+		top := *topSnapshot
 		st = top.State
 		name = top.Agent
 		// 完成/出错演 6 秒后退回空闲：不让一次成功永远占着屏幕
@@ -200,28 +198,39 @@ func (c *CompanionScene) cellsFor(name string) compCells {
 
 // Frame 实现 Scene。点阵是伴侣的；键盘背光帧从主题场景透传（固件灯效时
 // 主题帧本来就是 nil，固件自己跑，一帧都不推）。
-func (c *CompanionScene) Frame(t time.Duration) Render {
-	name, st := c.resolve()
-
-	col, ok := compColor[st]
-	if !ok {
-		col = compColor[agent.StateIdle]
+func (c *CompanionScene) Frame(t time.Duration, ch Channels) Picture {
+	var r Picture
+	if ch.Matrix {
+		name, st := c.resolve()
+		col, ok := compColor[st]
+		if !ok {
+			col = compColor[agent.StateIdle]
+		}
+		dt := time.Since(c.stateSince).Seconds()
+		g := compFrame(name, c.cellsFor(name), st, col.Float(), t.Seconds(), dt)
+		r.Matrix = &g
 	}
-
-	// dt 只在完成/出错里用：一次性动画需要"进入这个状态多久了"。
-	dt := time.Since(c.stateSince).Seconds()
-	g := compFrame(name, c.cellsFor(name), st, col.Float(), t.Seconds(), dt)
-	m := g.EncodeAnimated(color.DefaultCalibration(), 50, false)
-	// 预览帧满亮度：设备端压一半的点阵，页面上看原始颜色。
-	pm := g.Encode(color.DefaultCalibration(), 100, false)
-
-	r := Render{Matrix: &m, PrevMatrix: &pm}
-	if k := c.keysSource(); k != nil {
-		kr := k.Frame(t)
-		r.Keys = kr.Keys
-		r.PrevKeys = kr.PrevKeys
+	if ch.Keys {
+		if k := c.keysSource(); k != nil {
+			r.Keys = k.Frame(t, Channels{Keys: true}).Keys
+		}
 	}
 	return r
+}
+func (c *CompanionScene) Animation() Channels {
+	a := Channels{Matrix: true}
+	if k := c.keysSource(); k != nil {
+		a.Keys = k.Animation().Keys
+	}
+	return a
+}
+func (c *CompanionScene) Mode() device.Mode {
+	m := device.Mode{Matrix: true, Effect: -1}
+	if k := c.keysSource(); k != nil {
+		m = k.Mode()
+		m.Matrix = true
+	}
+	return m
 }
 
 // compFrame 按状态分发到各自的节奏。
@@ -395,26 +404,6 @@ func compError(c compCells, col color.RGBFloat, dt float64) frame.Grid {
 	}
 	br := 0.12 + 0.84*pulse
 	return paint(c, col, br, br*0.7, br)
-}
-
-// Enter 实现 Scene：点阵切自定义模式；背光配置交给主题场景的 Enter ——
-// 固件灯效写效果号、推流主题写 254，进伴侣前后键盘灯效不变。
-func (c *CompanionScene) Enter(ctx context.Context, ctrl *device.Controller) error {
-	if k := c.keysSource(); k != nil {
-		return k.Enter(ctx, ctrl)
-	}
-	_, err := ctrl.PatchConfig(ctx, proto.DotModePatch(
-		proto.DotModeCustom, u8(90), u8(3), nil, nil, nil))
-	return err
-}
-
-// Exit 实现 Scene。透传源的 Exit 必须对称调用 —— 里面有 ForgetKeys：
-// 专注场景会把背光模式切成 0，回来时键灯帧若和缓存相同会被去重永久挡掉，
-// 不 ForgetKeys 键盘灯就滞留在旧画面。
-func (c *CompanionScene) Exit(ctx context.Context, ctrl *device.Controller) {
-	if k := c.keysSource(); k != nil {
-		k.Exit(ctx, ctrl)
-	}
 }
 
 func itoa(v int64) string {

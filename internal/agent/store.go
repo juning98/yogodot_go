@@ -2,8 +2,10 @@ package agent
 
 import (
 	"container/list"
+	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -63,12 +65,13 @@ type Outcome struct {
 // 去重窗口、乱序宽限、待处理账本、迟到事件 —— 它们互相耦合，
 // 拆开各自加锁反而更难推。
 type Store struct {
-	mu       sync.Mutex
-	sessions map[string]*Session
-	seen     *lru              // eventId 去重
-	requests map[string]string // requestId -> session key
-	ended    map[string]int64  // sessionId -> 结束时刻（毫秒）
-	endedLRU *list.List
+	published atomic.Pointer[Snapshot]
+	mu        sync.Mutex
+	sessions  map[string]*Session
+	seen      *lru              // eventId 去重
+	requests  map[string]string // requestId -> session key
+	ended     map[string]int64  // sessionId -> 结束时刻（毫秒）
+	endedLRU  *list.List
 	// endedIdx 给每个 key 定位它在 LRU 里的唯一节点：
 	// 重复 end 或结束后复活再 end 不能叠加节点,否则驱逐逻辑会
 	// 顺着陈旧节点提前删掉该会话较新的 ended 记录。
@@ -93,6 +96,7 @@ func nowMS() int64 { return time.Now().UnixMilli() }
 func (s *Store) Apply(ev Event) Outcome {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.publishLocked()
 
 	now := time.Now()
 	out := Outcome{OK: true, Event: string(ev.Name), Session: ev.SessionID}
@@ -405,9 +409,61 @@ func (s *Store) markEndedLocked(key string, atMS int64) {
 
 // Snapshot 返回当前所有会话，外加"最该提醒你的那一个"。
 func (s *Store) Snapshot() Snapshot {
+	p := s.published.Load()
+	if p == nil {
+		return Snapshot{Sessions: []Session{}}
+	}
+	v := *p
+	v.Sessions = append([]Session{}, p.Sessions...)
+	if p.Top != nil {
+		top := *p.Top
+		v.Top = &top
+	}
+	return v
+}
+
+// Top 是渲染热路径：只取一个只读快照，不复制整个会话表。
+func (s *Store) Top() *Session {
+	p := s.published.Load()
+	if p == nil || p.Top == nil {
+		return nil
+	}
+	top := *p.Top
+	return &top
+}
+func (s *Store) publishLocked() { v := s.snapshotLocked(time.Now()); s.published.Store(&v) }
+
+// Prune 在写侧做过期转换，读快照永远没有清理副作用。
+func (s *Store) Prune(now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.snapshotLocked(time.Now())
+	changed := false
+	for _, cur := range s.sessions {
+		age := now.Unix() - cur.At
+		if age > int64(DropAfter/time.Second) || (cur.State != StateIdle && age > int64(IdleAfter/time.Second)) {
+			changed = true
+			break
+		}
+	}
+	if changed {
+		v := s.snapshotLocked(now)
+		s.published.Store(&v)
+	}
+	return changed
+}
+func (s *Store) Run(ctx context.Context, every time.Duration, onChange func()) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			if s.Prune(now) && onChange != nil {
+				onChange()
+			}
+		}
+	}
 }
 
 func (s *Store) snapshotLocked(now time.Time) Snapshot {
@@ -426,7 +482,10 @@ func (s *Store) snapshotLocked(now time.Time) Snapshot {
 			cur.State = StateIdle
 			s.dropAttentionLocked(cur, "")
 		}
-		rows = append(rows, *cur)
+		row := *cur
+		row.pending = nil
+		row.completed = nil
+		rows = append(rows, row)
 	}
 	for _, k := range dead {
 		s.dropLocked(k)
@@ -455,6 +514,7 @@ func (s *Store) snapshotLocked(now time.Time) Snapshot {
 func (s *Store) Clear(sessionID string, all bool) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.publishLocked()
 
 	var keys []string
 	if all {

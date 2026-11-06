@@ -5,6 +5,24 @@
 
 原项目（Python + 隐藏 Chrome）在 `D:\Projects\yogodot`，本仓库是 Go 重写。
 
+## 2026-11-06：独立开关的过渡闪烁修复
+
+真机回读确认：配置写入必须包含最后一个分段才会提交。但提交共享配置会影响两路显示，
+只写变化分段并不能保证切换过程互不干扰。此前亮度归零和背光模式关闭虽然最终能熄灯，
+用户仍观察到点阵闪回其它图案、背光恢复前黑等，不能据最终状态正确判为通过。
+
+日常开关改为保留底层模式、对应通道只写一次黑帧、关闭期间停止渲染及推帧；软件动画恢复
+直接发送当前时刻的画面。模式接管、重连及底层灯效变化仍写配置并回读，配置变化后重新
+应用两路目标。固件背光用逐键黑帧临时接管，恢复时退出逐键推流。
+
+当前 ATK YOGO 75 PRO 2.4G 真机以 DeepSeek 动画重复测试：点阵、背光各三轮独立开关，
+12 次实际切换从 API 请求到软件完成为 60～131ms，前后 64 字节配置相同。
+用户确认“两组都正常，没有串图或黑等”。原厂背光效果的恢复仍未单独做实物验收。
+两路关闭超过 65 秒后，用户确认一直全灭、没有自行亮起。恢复 DeepSeek 后连续采样 125 秒，
+键盘预览 1250 个更新间隔的中位数 99.989ms、P99 101.565ms、最大 116.196ms，
+没有超过 150ms 的间隔；用户刷新控制台后确认没有再出现周期性卡顿。
+离线回归、设备与引擎竞态检查通过；新增协议测试约束独立开关不能发送配置或点阵结束同步命令。
+
 ## 2026-11-06：点阵低亮度呼吸红闪修复
 
 ATK Yogo75 PRO 有线模式下，DeepSeek 鲸在呼吸较暗阶段出现轻微红闪，静态显示正常。
@@ -44,7 +62,7 @@ ATK Yogo75 PRO 有线模式下，DeepSeek 鲸在呼吸较暗阶段出现轻微�
 
 收尾删除一次性全主题扫描、重复的浮点乘法/多档位统计测试及通道实验产物；保留量化误差与单调性、
 纯色/灰色边界、DeepSeek 低亮度呼吸、补帧串行化和熄屏保护回归。关键测试位于
-`internal/frame/quantization_test.go`、`internal/engine/scene_theme_test.go`、`internal/engine/pending_test.go`。
+`internal/frame/quantization_test.go`、`internal/engine/scene_theme_test.go`、`internal/engine/engine_test.go`。
 
 资料依据：[ATK HUB 3.2.31 官方播放器代码](https://bpcdn.atkgear.com/hub-v3/production/3.2.31/static/demoMode.store-DxbvbikM.js)、
 [Meta 空间与时间抖动技术说明](https://developers.meta.com/vr/blog/tech-note-shader-snippets-for-efficient-2d-dithering/)、
@@ -102,7 +120,7 @@ event: frame 次数 = 30            ← 3 秒 30 帧
 
 $ curl /api/state                   ← 设备段现在是页面能读的小驼峰
 {"connected":true,"awake":true,"product":"ATK YOGO 75 PRO Dongle",
- "power":{"percent":61,"charging":false},"dropped":365}
+ "power":{"percent":61,"charging":false}}
 
 $ yogod serve                       ← 25264 被占用时，立刻失败而不是半启动
 错误：控制台端口 127.0.0.1:25264 用不了（可能已被别的程序占用）…
@@ -136,7 +154,7 @@ state=busy pending=0 msg=执行：Read      ← 授权被适配器自动销掉�
 | `internal/frame` | Matrix[108] / Keys[168]、KBMap、Encode |
 | `internal/hid` | SetupAPI 枚举 + overlapped 读写（纯 syscall，无 cgo） |
 | `internal/device` | 事务、seq 分发、限速/去重/补发、电量、分包 |
-| `internal/engine` | 帧泵、Scene、熄屏闸门、liveness、主题/专注/番茄钟/伴侣场景 |
+| `internal/engine` | 帧泵、Scene、独立输出调度、主题/专注/番茄钟/伴侣场景 |
 | `internal/theme` | 24 主题 / 48 图案 / 7 动画 / 34 构图原语 |
 | `internal/store` | 单一 settings.json、原子写、config.bak、数据目录 |
 | `internal/agent` | 伴侣状态机（7 事件、去重、乱序、待处理账本、优先级） |
@@ -182,10 +200,9 @@ API 层原来一行测试都没有 —— 822 行，全是"编译得过、打开
 `TestConsoleFieldContract` 把页面里读的字段和服务端发的 JSON 绑在一起、
 `TestSingleInstanceBlocks` 断言第二次加锁必须失败。
 
-第四个（打字闸门）是靠**量出来的**，不是读代码读出来的：
-`/api/state` 里加了 `device.sent` 和 `device.dropBy`（按 typing / deduped /
-throttled 分开计数）之后，一眼就能看出到底是谁把帧挡了。
-修完实测：写入从 1.4 帧/秒 变成 4.2 帧/秒，typing 占比从 78% 降到 8%。
+第四个（打字闸门）当时通过临时运行统计定位：写入从 1.4 帧/秒变成 4.2 帧/秒，
+打字让路占比从 78% 降到 8%。这些是历史测量，不是当前调度依据。
+2026-11-06 已删除常驻累计统计及其看门狗；改用独立输出期限、成功帧去重、最新目标和失败退避。
 
 ## 刻意没做的（都有原因）
 

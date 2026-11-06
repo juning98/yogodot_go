@@ -54,10 +54,10 @@ var compStateEvents = map[string][]agent.Event{
 // 硬契约：伴侣场景只接管点阵，键盘帧要么透传主题、要么为空 ——
 // 绝不自己编一套。推流主题：键帧透传；固件灯效：键帧为 nil（固件自己跑）。
 func TestCompanionKeysArePassthroughOnly(t *testing.T) {
-	th := NewThemeScene(theme.Default(), true, color.DefaultCalibration())
+	th := NewThemeScene(theme.Default(), true)
 	sc := compScene(t, compStateEvents["busy"]...)
 	sc.SetKeys(th)
-	r := sc.Frame(0)
+	r := sc.Frame(0, Channels{true, true})
 	if r.Keys == nil {
 		t.Fatal("挂着推流主题时键帧应透传，得到 nil —— 键盘灯效就是这么丢的")
 	}
@@ -67,13 +67,13 @@ func TestCompanionKeysArePassthroughOnly(t *testing.T) {
 
 	eff := device.FirmwareEffect{ID: 3, Name: "单色呼吸", Colorful: true}
 	th.KBFirmware = &eff
-	if r := sc.Frame(0); r.Keys != nil {
+	if r := sc.Frame(0, Channels{true, true}); r.Keys != nil {
 		t.Error("固件灯效时一帧键帧都不许推（固件自己跑）")
 	}
 
 	// 不挂主题（兜底）：键帧 nil，绝不无中生有
 	sc.SetKeys(nil)
-	if r := sc.Frame(0); r.Keys != nil {
+	if r := sc.Frame(0, Channels{true, true}); r.Keys != nil {
 		t.Error("没有主题可透传时，伴侣不许自己造键帧")
 	}
 }

@@ -228,6 +228,45 @@ main{flex:0 1 auto;width:min(1120px,100%);min-width:0;margin:0 auto;padding:26px
 .slider label{width:70px;color:var(--dim);font-size:13px}
 .slider input{flex:1;accent-color:var(--ink);height:2px}
 .slider .val{font:13px var(--mono);width:32px;text-align:right}
+/* 独立输出：开关与亮度归入各自通道，背光在前、点阵在后。 */
+.output-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding-top:16px}
+.output-card{min-width:0;background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:20px;
+  transition:border-color .18s,background .18s}
+.output-head{display:flex;align-items:center;gap:12px}
+.output-icon{width:38px;height:38px;flex:none;display:grid;place-items:center;border:1px solid var(--line2);
+  border-radius:10px;background:var(--panel2);color:var(--ink)}
+.output-icon svg{width:23px;height:23px}
+.output-title{min-width:0;flex:1}
+.output-title h3{font-size:14px;font-weight:600;line-height:1.5}
+.output-title p{font-size:11.5px;color:var(--dim);margin-top:3px}
+.output-toggle{display:flex;align-items:center;gap:9px;cursor:pointer;flex:none;font-size:11.5px;color:var(--dim)}
+.output-toggle .toggle-off{display:none}
+.toggle-control{position:relative;display:inline-flex;width:42px;height:24px;flex:none}
+.toggle-control input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;z-index:1}
+.toggle-track{width:100%;height:100%;background:var(--line2);border:1px solid var(--line2);border-radius:99px;
+  transition:background .18s,border-color .18s}
+.toggle-track::after{content:"";display:block;width:16px;height:16px;border-radius:50%;margin:3px;
+  background:var(--dim);transition:transform .18s,background .18s}
+.toggle-control input:checked+.toggle-track{background:var(--ink);border-color:var(--ink)}
+.toggle-control input:checked+.toggle-track::after{transform:translateX(18px);background:var(--panel)}
+.toggle-control input:focus-visible+.toggle-track{outline:2px solid var(--amber);outline-offset:4px}
+.output-toggle:has(input:not(:checked)) .toggle-on{display:none}
+.output-toggle:has(input:not(:checked)) .toggle-off{display:inline}
+.output-card:has(.toggle-control input:not(:checked)){border-color:var(--line)}
+.output-card:has(.toggle-control input:not(:checked)) .output-icon{color:var(--dim);background:transparent;border-color:var(--line)}
+.output-level{display:flex;align-items:baseline;justify-content:space-between;margin-top:22px;padding-top:15px;
+  border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+.output-level .reading{font:21px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);line-height:1.3}
+.output-level .reading small{font-size:11px;margin-left:4px;color:var(--dim)}
+.output-range{display:block;width:100%;height:26px;margin:9px 0 0;appearance:none;-webkit-appearance:none;cursor:pointer;
+  background:linear-gradient(to right,var(--ink) 0 var(--level,0%),var(--line2) var(--level,0%) 100%) center/100% 4px no-repeat}
+.output-range::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--ink);border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line2)}
+.output-range::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:var(--ink);border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line2)}
+.output-range:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:5px}
+@media(max-width:1050px){.output-head{flex-wrap:wrap}.output-toggle{margin-left:auto}.output-title p{font-size:11px}}
+@media(max-width:760px){.output-grid{grid-template-columns:1fr}.output-card{padding:17px 18px}.output-head{flex-wrap:nowrap}}
+@media(prefers-reduced-motion:reduce){.output-card,.toggle-track,.toggle-track::after{transition:none}}
 .switch{display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
 .switch button{padding:7px 18px;font-size:13px;color:var(--dim)}
 .switch button.sel{background:var(--ink);color:var(--bg);font-weight:600}
@@ -243,11 +282,6 @@ main{flex:0 1 auto;width:min(1120px,100%);min-width:0;margin:0 auto;padding:26px
 .saved.on{opacity:1}
 details.adv{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:12px 16px}
 details.adv summary{cursor:pointer;color:var(--dim);font-size:13px}
-.diag{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;padding-top:14px}
-.diag .d{border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-.diag .d .n{font:300 26px/1.2 var(--mono)}
-.diag .d .t{font-size:13px;padding-top:2px}
-.diag .d .s{font-size:12px;color:var(--faint);padding-top:3px}
 .plan2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:14px}
 .plan2 .pc{border:1px dashed var(--line2);border-radius:12px;padding:16px 18px}
 .plan2 .pc b{display:block;font-size:14px;margin-bottom:4px}
@@ -284,6 +318,7 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:13px}
 </style>
 </head>
 <body>
+<div id="opError" role="alert" hidden style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;padding:12px 20px;border-radius:8px;background:#9a2435;color:white;max-width:80vw"></div>
 
 <aside>
   <div class="brand">
@@ -456,9 +491,28 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:13px}
     </div>
 
     <div class="sect">
-      <h2>亮度</h2>
-      <div class="slider"><label>点阵屏</label><input type="range" min="0" max="100" id="brDot"><span class="val" id="brDotV">—</span></div>
-      <div class="slider"><label>键盘背光</label><input type="range" min="0" max="100" id="brKb"><span class="val" id="brKbV">—</span></div>
+      <h2>输出与亮度</h2>
+      <div class="sub">分别控制开关与亮度，重新开启时保留上次亮度。</div>
+      <div class="output-grid">
+        <div class="output-card">
+          <div class="output-head">
+            <span class="output-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 15h10"/></svg></span>
+            <div class="output-title"><h3>键盘背光</h3><p>84 键 · 主题与原厂灯效</p></div>
+            <label class="output-toggle"><span aria-hidden="true"><span class="toggle-on">已开启</span><span class="toggle-off">已关闭</span></span><span class="toggle-control"><input type="checkbox" role="switch" id="outKeys" aria-label="键盘背光"><span class="toggle-track" aria-hidden="true"></span></span></label>
+          </div>
+          <div class="output-level"><label for="brKb">亮度</label><span class="reading"><span id="brKbV">—</span><small>%</small></span></div>
+          <input class="output-range" type="range" min="0" max="100" id="brKb" aria-label="键盘背光亮度">
+        </div>
+        <div class="output-card">
+          <div class="output-head">
+            <span class="output-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="4" height="4" rx="1"/><rect x="10" y="3" width="4" height="4" rx="1"/><rect x="17" y="3" width="4" height="4" rx="1"/><rect x="3" y="10" width="4" height="4" rx="1"/><rect x="10" y="10" width="4" height="4" rx="1"/><rect x="17" y="10" width="4" height="4" rx="1"/><rect x="3" y="17" width="4" height="4" rx="1"/><rect x="10" y="17" width="4" height="4" rx="1"/><rect x="17" y="17" width="4" height="4" rx="1"/></svg></span>
+            <div class="output-title"><h3>点阵屏</h3><p>6 × 6 · 图案与动画</p></div>
+            <label class="output-toggle"><span aria-hidden="true"><span class="toggle-on">已开启</span><span class="toggle-off">已关闭</span></span><span class="toggle-control"><input type="checkbox" role="switch" id="outDot" aria-label="点阵屏"><span class="toggle-track" aria-hidden="true"></span></span></label>
+          </div>
+          <div class="output-level"><label for="brDot">亮度</label><span class="reading"><span id="brDotV">—</span><small>%</small></span></div>
+          <input class="output-range" type="range" min="0" max="100" id="brDot" aria-label="点阵屏亮度">
+        </div>
+      </div>
     </div>
 
     <div class="sect">
@@ -475,7 +529,7 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:13px}
       <h2>输入保护 <span class="saved" id="tgSaved">已保存</span></h2>
       <div class="sub">默认关。开着时打字暂停推帧、停手 250ms 后补发;关了动画不被打字打断。
         推帧档位开得越高,动画越容易和击键抢 2.4G 带宽 —— 档位开高后感觉打字发飘时,
-        打开它对比试试(系统页「打字让路」能看到它挡了多少帧)。</div>
+        可以打开它对比打字手感。</div>
       <div style="padding-top:12px">
         <span class="switch" id="tgSw"><button>开</button><button>关</button></span>
       </div>
@@ -520,22 +574,14 @@ details.adv summary{cursor:pointer;color:var(--dim);font-size:13px}
   <section class="page" data-page="system">
     <div class="phead">
       <h1>系统</h1>
-      <p>设备、服务与诊断。键盘不动时,先看诊断里哪个数最大。</p>
-    </div>
-    <div class="sect">
-      <h2>诊断 <span style="font-weight:400;font-size:12px;color:var(--faint)">本次启动累计</span></h2>
-      <div class="diag">
-        <div class="d"><div class="n" id="dgSent">0</div><div class="t">已发送帧</div><div class="s">长时间不涨 = 一帧都没写进去</div></div>
-        <div class="d"><div class="n" id="dgDedup">0</div><div class="t">画面没变,跳过</div><div class="s">占大头 = 正常,本来就没变化</div></div>
-        <div class="d"><div class="n" id="dgThrot">0</div><div class="t">省电限速</div><div class="s">被当前推帧档位挡下,待补发;档位在「键盘」页调</div></div>
-        <div class="d"><div class="n" id="dgTyping">0</div><div class="t">打字让路</div><div class="s">你停手 250ms 后补发</div></div>
-      </div>
+      <p>设备连接与输出状态。</p>
     </div>
     <div class="sect">
       <h2>设备</h2>
       <div style="max-width:560px;padding-top:8px">
         <div class="kv"><span class="k">型号</span><span class="v" id="dvProd">—</span></div>
         <div class="kv"><span class="k">连接</span><span class="v" id="dvLink">—</span></div>
+        <div class="kv"><span class="k">输出</span><span class="v" id="dvOutput">等待设备应用</span></div>
         <div class="kv"><span class="k">电量</span><span class="v mono" id="dvBatt">—</span></div>
       </div>
     </div>
@@ -644,12 +690,8 @@ function renderState(s){
   }
   $("dvProd").textContent=s.device.product||"—";
   $("dvLink").textContent=s.device.connected?(s.device.wired?"数据线":"2.4G 接收器"):"未连接";
-  // 诊断
-  const db=s.device.dropBy||{};
-  $("dgSent").textContent=s.device.sent??0;
-  $("dgDedup").textContent=db.deduped??0;
-  $("dgThrot").textContent=db.throttled??0;
-  $("dgTyping").textContent=db.typing??0;
+  $("dvOutput").textContent=s.output?.error?"应用失败："+s.output.error:(s.output?.pending?"等待设备应用":"已应用");
+  if(s.settings)renderSettings(s.settings);
   // 主题与场景
   $("mTheme").textContent=s.themeName||"—";
   $("mDyn").textContent=s.dynamic?"动态":"静态";
@@ -663,7 +705,7 @@ function renderState(s){
   $("focusBtn").textContent=s.scene==="focus"?"退出专注":"进入专注";
   // 背光来源:固件灯效时背光不归我们推,键盘预览盖上说明
   const fw=(s.kbEffect??-1)>=0;
-  $("keys").classList.toggle("fwmask",fw);
+  $("keys").classList.toggle("fwmask",fw&&["theme","companion"].includes(s.scene)&&s.settings?.outputs?.keys!==false&&s.settings?.brightness?.keys!==0);
   $("srcTheme").classList.toggle("sel",!fw);
   $("srcFw").classList.toggle("sel",fw);
   $("fxArea").hidden=!fw;
@@ -749,11 +791,11 @@ function buildCompLegend(){
 const DEMO_EV={busy:"user_message_submitted",wait:"approval_requested",
   ask:"supplement_requested",done:"turn_completed",error:"turn_completed"};
 async function demoState(st){
-  await post("/api/scene",{id:"companion"});
+  if(!await post("/api/scene",{id:"companion"}))return;
   if(st!=="idle"){
     const body={event:DEMO_EV[st],sessionId:"demo",agent:curAgent||"claude-code",name:"演示",occurredAt:Date.now()};
     if(st==="error")body.outcome="failed";
-    await post("/api/events",body);
+    if(!await post("/api/events",body))return;
   }
   $("demoNote").textContent=st==="idle"?"已切到伴侣场景,看慢呼吸":"已发到演示会话,看点阵屏";
   setTimeout(()=>{$("demoNote").textContent=""},3500);
@@ -783,8 +825,8 @@ function agentTile(id,art,nm,ds){
   return cl;
 }
 async function pickAgent(id){
-  await post("/api/settings",{idle_agent:id});
-  await post("/api/scene",{id:"companion"});
+  if(!await post("/api/settings",{idle_agent:id}))return;
+  if(!await post("/api/scene",{id:"companion"}))return;
   curAgent=id;
   markAgentSel();
   buildCompLegend();
@@ -922,12 +964,16 @@ async function loadKeyboard(){
     }
   }
 }
-async function loadSettings(){
-  try{
-    const s=await (await fetch("/api/settings")).json();
+async function loadSettings(){try{renderSettings(await (await fetch("/api/settings")).json());}catch(e){}}
+function renderSettings(s){
+ // 用户正在编辑时不覆盖输入框；保存成功或失败会再同步后端状态。
+ const editing=document.activeElement?.matches("input");
+ if(!editing){
     if(s.brightness){
       $("brDot").value=Math.round(s.brightness.dot);$("brDotV").textContent=Math.round(s.brightness.dot);
       $("brKb").value=Math.round(s.brightness.keys);$("brKbV").textContent=Math.round(s.brightness.keys);
+      $("brDot").style.setProperty("--level",$("brDot").value+"%");
+      $("brKb").style.setProperty("--level",$("brKb").value+"%");
     }
     if(s.idle){
       $("idleBlank").value=s.idle.blank_seconds;
@@ -944,15 +990,25 @@ async function loadSettings(){
       $("calR").value=s.calibration.gain[0];$("calG").value=s.calibration.gain[1];$("calB").value=s.calibration.gain[2];
       $("calCorr").value=s.calibration.corr;$("calSat").value=s.calibration.sat;$("calEql").value=s.calibration.eql;
     }
-  }catch(e){}
+ }
+ if(s.outputs){$("outDot").checked=s.outputs.dot;$("outKeys").checked=s.outputs.keys;}
 }
 
 /* ── 操作 ── */
-async function post(path,body){
+let postQueue=Promise.resolve();
+function post(path,body){
+ const run=async()=>{
   try{
-    const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
-    if(!r.ok)$("stConn").textContent="操作失败:"+(await r.text());
-  }catch(e){$("stConn").textContent="请求失败:"+e.message;}
+   const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+   if(!r.ok)throw new Error(await r.text());
+   const data=await r.json();if(data.ok===false)throw new Error(data.why||"操作失败");
+   $("opError").hidden=true;
+   if(data.scene&&data.device)renderState(data);
+   else if(path==="/api/settings")renderSettings(data);
+   return true;
+  }catch(e){$("opError").textContent="操作失败："+e.message;$("opError").hidden=false;await loadSettings();return false;}
+ };
+ postQueue=postQueue.then(run,run);return postQueue;
 }
 function flashSaved(id){const el=$(id);el.classList.add("on");clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove("on"),1600);}
 
@@ -1016,34 +1072,32 @@ document.querySelectorAll("#dynSw button").forEach((b,i)=>b.onclick=()=>{
   if(state)post("/api/theme",{id:state.theme,dynamic:i===0});
 });
 for(const[id,vid,key]of[["brDot","brDotV","dot"],["brKb","brKbV","keys"]]){
-  $(id).oninput=e=>{$(vid).textContent=e.target.value;};
+  $(id).oninput=e=>{$(vid).textContent=e.target.value;e.target.style.setProperty("--level",e.target.value+"%");};
   $(id).onchange=e=>{const b={};b[key]=+e.target.value;post("/api/brightness",b);};
 }
 
+for(const id of["outDot","outKeys"])$(id).onchange=()=>post("/api/settings",{outputs:{dot:$("outDot").checked,keys:$("outKeys").checked}});
+
 /* 熄屏策略 + 校准(可写,POST /api/settings) */
-function saveIdle(){
-  post("/api/settings",{idle:{
+async function saveIdle(){
+  const ok=await post("/api/settings",{idle:{
     blank_seconds:+$("idleBlank").value||0,
     keys_off_percent:+$("idleKeysOff").value||0,
     all_off_percent:+$("idleAllOff").value||0}});
-  flashSaved("idleSaved");
+  if(ok)flashSaved("idleSaved");
 }
 for(const id of["idleBlank","idleKeysOff","idleAllOff"])$(id).onchange=saveIdle;
-document.querySelectorAll("#tgSw button").forEach((b,i)=>b.onclick=()=>{
-  document.querySelectorAll("#tgSw button").forEach((x,j)=>x.classList.toggle("sel",j===i));
-  post("/api/settings",{typing_guard:i===0});
-  flashSaved("tgSaved");
+document.querySelectorAll("#tgSw button").forEach((b,i)=>b.onclick=async()=>{
+  if(await post("/api/settings",{typing_guard:i===0}))flashSaved("tgSaved");
 });
-document.querySelectorAll("#rtSw button").forEach((b,i)=>b.onclick=()=>{
-  document.querySelectorAll("#rtSw button").forEach((x,j)=>x.classList.toggle("sel",j===i));
-  post("/api/settings",{rate_tier:i});
-  flashSaved("rtSaved");
+document.querySelectorAll("#rtSw button").forEach((b,i)=>b.onclick=async()=>{
+  if(await post("/api/settings",{rate_tier:i}))flashSaved("rtSaved");
 });
-function saveCal(){
-  post("/api/settings",{calibration:{
+async function saveCal(){
+  const ok=await post("/api/settings",{calibration:{
     gain:[+$("calR").value||0,+$("calG").value||0,+$("calB").value||0],
-    corr:+$("calCorr").value||0,sat:+$("calSat").value||0,eql:+$("calEql").value||0,dot_calib:false}});
-  flashSaved("calSaved");
+    corr:+$("calCorr").value||0,sat:+$("calSat").value||0,eql:+$("calEql").value||0,dot_calib:state?.settings?.calibration?.dot_calib??false}});
+  if(ok)flashSaved("calSaved");
 }
 for(const id of["calR","calG","calB","calCorr","calSat","calEql"])$(id).onchange=saveCal;
 $("calDefault").onclick=()=>{
@@ -1082,7 +1136,7 @@ function connect(){
   es.addEventListener("frame",e=>{
     const f=JSON.parse(e.data);
     drawMatrix(f.m);
-    if((state?(state.kbEffect??-1):-1)<0)drawKeys(f.k);
+    drawKeys(f.k);
   });
   es.onerror=()=>{es.close();$("sseTag").classList.add("down");
     setTimeout(connect,2000);};

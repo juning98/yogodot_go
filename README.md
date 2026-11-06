@@ -9,6 +9,9 @@ Python 原项目：[yogodot](https://github.com/Wednesque/yogodot)
 
 ![yogod 控制台：84 键背光与 6×6 点阵的实时预览，下方是主题画廊](docs/img/console-theme.png)
 
+> **v1.1.0 · 流光自如** — 动画与设备通信解耦，点阵、背光独立开关，输出与亮度界面升级。
+> [查看完整更新与实测结果](https://github.com/juning98/yogodot_go/releases/tag/v1.1.0)
+
 ## 下载
 
 **[下载最新版 yogod（windows-amd64.zip，约 3 MB）](https://github.com/juning98/yogodot_go/releases/latest)**
@@ -40,7 +43,7 @@ exe 没有代码签名证书就会这样，并非报毒。展开「更多信息�
 - **20 个原厂键盘灯效**：背光交给键盘自己的芯片跑，主机一帧不推，最省电。
 - **番茄钟 / 专注**：点阵外圈走进度、键盘就是进度条，到点自动切过去提醒；
   专注模式一键全灭，退出恢复原样。
-- **省电**：锁屏几秒全灭、离开自动渐暗；推帧档位三档可调，默认档对 2.4G 击键无感。
+- **独立灯控与省电**：点阵、背光分别开关，关闭后停止该路渲染和推帧；锁屏、空闲自动熄灯，推帧档位三档可调。
 - **链路自愈**：键盘休眠、被官方 HUB 抢、有线/2.4G 热切换，都能自己恢复。
 
 ![番茄钟：大计时器 + 点阵进度环 + 键盘进度条](docs/img/console-pomodoro.png)
@@ -90,8 +93,10 @@ yogod hook install --agent cursor     # 打印要合并进工具配置的片段
 - **背光来源**：主题配色（逐键推流，和点阵成套）或原厂灯效（固件驱动，零推帧）。
 - **动态 / 静态**：静态 = 点阵和背光都定格，最省电。
 
-「系统」页：推帧档位（默认 6/10、流畅 10/20、极速 15/25 fps）、输入保护、
-熄屏策略（渐暗 → 全灭）、灯珠校准（白平衡/饱和/限流，滑杆实时生效）。
+推帧档位（默认 6/10、流畅 10/20、极速 15/25 fps）、输入保护、
+熄屏策略、灯珠校准（白平衡/饱和/限流，滑杆实时生效）均在「键盘」页；「系统」页显示连接与输出状态。
+
+![v1.1.0 输出与亮度：背光在左、点阵在右，各自独立开关与调光](docs/img/console-output-v1.1.jpg)
 
 ## 常见问题
 
@@ -173,7 +178,7 @@ $env:YOGO_PORT='8899'; yogod serve
 
 ```
 GET  /api/ping             健康检查
-GET  /api/state            全量状态（场景/主题/电量/番茄钟/会话/丢帧统计）
+GET  /api/state            全量状态（场景/主题/电量/番茄钟/会话/输出应用状态）
 GET  /api/themes           28 套主题（含 6×6 字符画）
 GET  /api/patterns         48 张图案，按 6 组
 GET  /api/agents           伴侣内置工具形状
@@ -186,28 +191,26 @@ POST /api/pomodoro         {action, preset?}     start/pause/skip/reset
 POST /api/events           伴侣标准事件（GET = SSE 帧与状态流）
 GET  /api/sessions         会话列表
 POST /api/sessions         清会话
-GET/POST /api/settings     配置（校准/熄屏/推帧档位/输入保护/空闲形状）
+GET/POST /api/settings     配置（输出开关/校准/熄屏/推帧档位/输入保护/空闲形状）
 ```
 
 `/kb/*` 保留了一套兼容层（`status` / `power` / `readcfg` / `config` / `dotmode` /
 `matrix` / `keys` / `stopkeys` / `reconnect`），给老脚本用。`/kb/lightbuf` 和
 `/kb/anim` 返回 `ok:false` —— VIA 灯效缓冲区和"页面塞帧序列"没有移植，动画由引擎驱动。
 
-## 键盘不动时先看这两个数
+## 输出状态与省资源
 
-`/api/state` 的 `device` 里有 `sent` 和 `dropBy`：
+控制台「键盘」页分别控制点阵、背光开关，关闭一路后停止该路渲染和推帧。
+两路独立关闭时各写一次全黑帧，随后停止该路渲染和推帧；软件动画恢复时直接发送当前画面。
+保留底层推流模式，避免固件重新提交共享配置时闪回其它图案。这里是灯光熄灭，不声称硬件断电。
+原厂背光效果关闭时也用黑帧临时接管，恢复时只退出逐键推流，继续原厂效果。
 
-```json
-"device": { "sent": 1284, "dropped": 5201,
-            "dropBy": { "deduped": 3120, "throttled": 1900, "typing": 181 } }
-```
+静态通道只渲染一次，成功发送后内容不变就不再发送。动态图像按两路独立期限限速，
+只保留最新目标；失败不会更新成功基线，重试退避一秒。连接恢复后重放当前目标。
+常驻帧数、丢帧分类和统计看门狗已经移除，资源调度不依赖这些计数。
 
-- `sent` 长时间不涨 → 一帧都没写进去（设备睡了 / 模式被改回去了）
-- `deduped` 占大头 → 画面本来就没变，正常
-- `throttled` 占大头 → 触到限速，正常
-- `typing` 占大头 → 输入保护把帧攒着呢，停手 250ms 补发
-
-还不行就看数据目录的 `yogod.log`。
+`/api/state.output` 区分设置已保存与设备已应用：`pending` 表示等待设备应用，
+`error` 是当前应用错误。`device` 提供连接、应答、电量和最近链路错误；这些是状态而非累计统计。
 
 ## 构建
 
@@ -215,7 +218,7 @@ GET/POST /api/settings     配置（校准/熄屏/推帧档位/输入保护/空�
 go build -trimpath -ldflags="-s -w -H windowsgui" -o yogod.exe ./cmd/yogod
 ```
 
-发版用 `build.cmd`：构建 exe + 收文档 + 打成 `dist\yogod.zip`（免安装，解开即用，
+发版用 `build.cmd`：构建 exe + 收文档 + 打成 `dist\yogod-v<版本>-windows-amd64.zip`（免安装，解开即用，
 沿用原项目的发布约定；约 3 MB）。
 
 **零第三方依赖**，只用标准库 + `syscall`/`unsafe` 直调 setupapi / hid / user32 /
@@ -233,7 +236,8 @@ shell32。不需要 cgo、hidapi、WebView2。编译产物约 7 MB 单文件（�
 ## 测试
 
 ```bash
-go vet ./... && go test ./...
+go vet ./...
+go test ./... -skip "TestLive|TestReadTimeout"
 ```
 
 几个值得单独说的：
@@ -246,32 +250,30 @@ go vet ./... && go test ./...
   对应原项目"跑久了就卡死"的老 bug。
 - **`internal/api` 盯"沉默降级"**：`TestConsoleFieldContract` 把页面读的字段和
   服务端真发的 JSON 绑在一起，改任一边都会红。
-- **`internal/hid` / `internal/device` 有真机集成测试**：插着键盘就真跑，没接自动 skip。
+- **`internal/hid` / `internal/device` 有真机集成测试**：上面的离线命令跳过它们。单独验收设备时先退出常驻程序，再显式运行真机测试。
 - 伴侣有状态机测试（心跳/叩门/绽放的节奏曲线）和"不许泄漏正文"测试。
 
 ## 两条关键设计
 
-### 1. 时钟与 IO 解耦
+### 1. 渲染只读内存，时钟与 IO 解耦
 
-```go
-case now := <-ticker.C:
-    r := scene.Frame(clock)   // 纯函数
-    select {
-    case out <- r:            // 1 槽邮箱
-    default:
-        <-out; out <- r       // 有未发出的帧？用新的覆盖它
-    }
-```
+场景按实际经过时间产出逻辑颜色，公共管线统一做亮度、校准和编码。
+预览使用原色，直接读取渲染快照；设备慢不会阻塞预览。电量轮询在后台执行并发布状态。
+静态通道与关闭的通道不重复渲染，双路静态时停止动画定时器。修改亮度和校准不重置动画相位。
 
-画面是**状态**不是队列 —— 写设备慢的时候，补发三秒前的画面毫无意义。
+最新目标通过单个快照交给发送循环。所有 HID 操作（整帧分包、读改写配置、电量、重连）
+通过同一个设备工作循环串行执行，避免分包交错。SSE 为每位订阅者分别保留最新状态和最新画面。
 
 ### 2. 设备模式以回读为准
 
-固件会自己退回原厂模式（休眠、Fn 键切灯效、被官方 HUB 抢），那种情况下推帧
-照样"写成功"但进了关闭的通道 —— 旧版的 `streamOn===254` 页面缓存永远发现不了。
-本版：进场景必重写模式、写结果带 `Result{Sent, Reason}`、liveness 连续 10 秒
-无真实写入就重进场景重推画面，外加每 60 秒一次只读配置对账，以及 `watchDevice`
-盯 HID 拓扑（有线/2.4G 热切换不用重启）。
+首次接管或切换底层灯效模式时写入并回读确认，完成后才发送对应画面。写入变化的配置分段后，
+补发配置区末尾一段提交修改（这把键盘的真机行为）。日常开关不写配置、不结束点阵同步；
+真正提交配置后，两路显示都重新应用当前目标，避免固件重绘后静态画面没有恢复。
+正常运行每 60 秒只读检查配置漂移，结合 HID 拓扑变化恢复链路；
+恢复不重新进入场景，不重置动画时钟。全灭期间不主动做配置对账。
+
+设置先完整校验；落盘等待不占用快照锁，保存失败返回错误，页面收到成功后才显示「已保存」。
+伴侣会话在事件写入和后台过期清理时生成快照，渲染只读优先会话。
 
 ## 移植时踩过的坑（留给后来人）
 
@@ -304,8 +306,8 @@ internal/proto/       报文与配置字节布局（纯函数，零依赖）
 internal/color/       灯珠调色：ledize / 增益 / 饱和度 / EQL / RGB565
 internal/frame/       点阵帧(108B) 与逐键帧(168B) 的编码
 internal/hid/         Windows HID：SetupAPI 枚举 + overlapped 读写
-internal/device/      协议事务、限速、去重、补发、电量、原厂灯效表
-internal/engine/      帧泵、Scene 接口、省电闸门、liveness 对账、预览帧
+internal/device/      串行设备事务、整帧写入、配置回读、电量、原厂灯效表
+internal/engine/      帧泵、Scene 接口、独立输出调度、预览快照
 internal/theme/       调色板、构图原语、24 套移植主题 + 4 套原生、48 张图案
 internal/store/       settings.json（单一来源、原子写、可迁移）
 internal/agent/       伴侣事件的状态机

@@ -18,7 +18,6 @@ import (
 	"github.com/wednesque/yogod/internal/color"
 	"github.com/wednesque/yogod/internal/device"
 	"github.com/wednesque/yogod/internal/engine"
-	"github.com/wednesque/yogod/internal/proto"
 	"github.com/wednesque/yogod/internal/store"
 	"github.com/wednesque/yogod/internal/sys"
 	"github.com/wednesque/yogod/internal/theme"
@@ -44,12 +43,12 @@ type app struct {
 	ag   *agent.Store
 	api  *api.Server
 
-	mu          sync.Mutex
-	sceneID     string
-	themeScene  *engine.ThemeScene
-	comp        *engine.CompanionScene
-	cal         color.Calibration
-	typingGuard atomic.Bool
+	mu           sync.Mutex
+	transitionMu sync.Mutex
+	controlMu    sync.Mutex
+	themeScene   *engine.ThemeScene
+	comp         *engine.CompanionScene
+	typingGuard  atomic.Bool
 }
 
 // runServe 是 `yogod serve`：托盘 + 本地 API + 帧引擎，常驻。
@@ -96,9 +95,6 @@ func runServe(addr string, noTray, noConsole bool) error {
 	if a.st, err = store.Open(a.dir); err != nil {
 		return err
 	}
-	a.cal = color.Calibration{
-		Gain: a.st.Calib.Gain, Corr: a.st.Calib.Corr, Sat: a.st.Calib.Sat, EQL: a.st.Calib.EQL,
-	}
 	logf("配置目录 %s", a.dir)
 
 	if a.dev, err = device.Open(ctx); err != nil {
@@ -109,9 +105,6 @@ func runServe(addr string, noTray, noConsole bool) error {
 	// 关了动画不被打字打断（连接质量好才建议关，2.4G 下开着稳）。
 	// 用 atomic 是因为引擎的写 goroutine 和 HTTP 的 POST 都会碰它。
 	a.typingGuard.Store(a.st.TypingGuard)
-	a.dev.Typing = func() bool {
-		return a.typingGuard.Load() && sys.RecentKeyInput(sys.TypingGuardMS)
-	}
 	// 打字保护默认关，全局键盘钩子也只在保护开启时才装 ——
 	// 一个默认不用的功能不该常驻全局钩子。打开保护时再装（幂等）;
 	// 装不上就退回 GetLastInputInfo（那时鼠标也会算"在打字"）。
@@ -119,13 +112,12 @@ func runServe(addr string, noTray, noConsole bool) error {
 		a.startKeyHook()
 	}
 	// 推帧档位（默认/流畅/极速），热切换链路后依然生效
-	a.dev.SetRateTier(device.RateTier(a.st.RateTier))
 
 	st := a.dev.Status()
 	logf("键盘 %q（%s）应答=%v", st.Product, wiredName(st.Wired), st.Awake)
 
 	// ── 引擎 ──
-	a.eng = engine.New(a.dev, engine.Options{Tick: time.Second / 30, Logf: logf})
+	a.eng = engine.New(a.dev, engine.Options{Tick: time.Second / 30, Typing: func() bool { return a.typingGuard.Load() && sys.RecentKeyInput(sys.TypingGuardMS) }})
 	pm := &engine.PowerMonitor{
 		LockFn: sys.Locked,
 		IdleFn: func() float64 { return sys.IdleSeconds(engine.IdleBlankAfter.Seconds()) },
@@ -148,17 +140,7 @@ func runServe(addr string, noTray, noConsole bool) error {
 	}
 	a.st.View(func(st *store.Settings) { applyIdlePolicy(st.IdlePolicy) })
 	a.eng.SetPower(pm)
-	a.eng.OnLiveness = func() {
-		logf("liveness：重写设备模式并重推画面")
-		a.dev.Invalidate()
-		a.mu.Lock()
-		id := a.sceneID
-		sc := a.themeScene
-		a.mu.Unlock()
-		if id == "theme" && sc != nil {
-			_ = a.eng.SetScene(ctx, sc)
-		}
-	}
+	a.applyOutput()
 
 	// ── 伴侣与番茄钟 ──
 	a.ag = agent.NewStore()
@@ -175,7 +157,6 @@ func runServe(addr string, noTray, noConsole bool) error {
 	a.themeScene = a.newThemeScene(themeID, a.st.Dynamic)
 	// 伴侣只接管点阵：背光帧从主题场景透传，切进伴侣不丢键盘灯效。
 	comp.SetKeys(a.themeScene)
-	a.sceneID = a.st.Mode
 
 	if err := a.switchScene(a.st.Mode, comp); err != nil {
 		logf("进入初始场景失败：%v", err)
@@ -183,20 +164,15 @@ func runServe(addr string, noTray, noConsole bool) error {
 
 	// ── API ──
 	a.api = api.New(api.Deps{
-		Engine:   a.eng,
-		Device:   a.dev,
-		Settings: a.st,
-		Agent:    a.ag,
-		Pomodoro: a.pomo,
-		Console:  api.ConsoleFS(),
-		Logf:     logf,
-		SwitchScene: func(id string) error {
-			if err := a.switchScene(id, comp); err != nil {
-				return err
-			}
-			a.st.Update(func(st *store.Settings) { st.Mode = id })
-			return a.st.Save()
-		},
+		Control:     &a.controlMu,
+		Engine:      a.eng,
+		Device:      a.dev,
+		Settings:    a.st,
+		Agent:       a.ag,
+		Pomodoro:    a.pomo,
+		Console:     api.ConsoleFS(),
+		Logf:        logf,
+		SwitchScene: func(id string) error { return a.switchScene(id, comp) },
 		SwitchTheme: func(id string, dynamic bool) error {
 			// 页面点主题 = 明确要看这套：必须切进主题场景（含点阵）。
 			return a.switchTheme(id, dynamic, true)
@@ -211,42 +187,21 @@ func runServe(addr string, noTray, noConsole bool) error {
 				a.startKeyHook()
 			}
 		},
-		SetRateTier: func(t int) {
-			a.dev.SetRateTier(device.RateTier(t))
-		},
 		SetIdleAgent: func(id string) {
 			comp.SetIdleAgent(id)
 		},
 		SetIdlePolicy: applyIdlePolicy,
-		RebuildTheme: func() error {
-			a.mu.Lock()
-			sc := a.themeScene
-			a.mu.Unlock()
-			if sc == nil {
-				return nil
-			}
-			return a.switchTheme(sc.Theme.ID, sc.Dynamic, false)
-		},
-		SetCalib: func(c store.Calibration) error {
-			a.mu.Lock()
-			a.cal = color.Calibration{Gain: c.Gain, Corr: c.Corr, Sat: c.Sat, EQL: c.EQL}
-			sc := a.themeScene
-			a.mu.Unlock()
-			if sc == nil {
-				return nil
-			}
-			return a.switchTheme(sc.Theme.ID, sc.Dynamic, false)
-		},
-		ExePath: exePath(),
-		Version: version,
-		Save:    func() error { return a.st.Save() },
+		ApplyOutput:   a.applyOutput,
+		ExePath:       exePath(),
+		Version:       version,
+		Save:          func() error { return a.st.Save() },
 	})
 
 	// ── 后台循环 ──
 	go pm.Run(ctx, 2*time.Second)
 	go func() { _ = a.eng.Pump(ctx) }()
 	go func() { _ = a.eng.Drain(ctx) }()
-	go a.eng.WatchLiveness(ctx, 10*time.Second)
+	go a.ag.Run(ctx, time.Second, a.api.Broadcast)
 	go a.api.RunPreview(ctx, 100*time.Millisecond)
 	go a.pomodoroLoop(ctx)
 	go a.watchDevice(ctx, comp, pm)
@@ -272,7 +227,7 @@ func runServe(addr string, noTray, noConsole bool) error {
 			IconPath: iconPath(a.dir),
 			Items: func() []sys.MenuItem {
 				a.mu.Lock()
-				cur := a.sceneID
+				cur := a.st.Snapshot().Mode
 				a.mu.Unlock()
 				return []sys.MenuItem{
 					{ID: 1, Label: "打开控制台"},
@@ -291,11 +246,11 @@ func runServe(addr string, noTray, noConsole bool) error {
 				case 1:
 					openConsole("http://" + addr)
 				case 2:
-					_ = a.switchScene("focus", comp)
+					_ = a.controlScene("focus", comp)
 				case 3:
-					_ = a.switchScene("pomodoro", comp)
+					_ = a.controlScene("pomodoro", comp)
 				case 4:
-					_ = a.switchScene("companion", comp)
+					_ = a.controlScene("companion", comp)
 				case 5:
 					if err := sys.SetAutostart(!sys.AutostartEnabled()); err != nil {
 						logf("开机自启切换失败：%v", err)
@@ -313,7 +268,7 @@ func runServe(addr string, noTray, noConsole bool) error {
 		}
 	}
 
-	logf("退出：写入 %d 帧，丢弃/去重 %d 帧", a.eng.Sent(), a.eng.Dropped())
+	logf("服务退出")
 	return nil
 }
 
@@ -370,8 +325,8 @@ func (a *app) watchDevice(ctx context.Context, comp *engine.CompanionScene, pm *
 			if _, err := a.dev.Power(ctx, true); err == nil {
 				if !st.Awake {
 					logf("键盘恢复应答（%s）", wiredName(a.dev.Wired()))
-					a.dev.Invalidate()
-					a.reenterScene(comp)
+					a.dev.ResetOutput(ctx)
+					a.eng.Notify()
 					a.api.Broadcast()
 				}
 				continue
@@ -391,68 +346,24 @@ func (a *app) watchDevice(ctx context.Context, comp *engine.CompanionScene, pm *
 				wiredName(oldWired), wiredName(a.dev.Wired()), a.dev.Product())
 		}
 		if a.dev.Awake() {
-			a.dev.Invalidate()
-			a.reenterScene(comp)
+			a.eng.Notify()
 		}
 		a.api.Broadcast()
 	}
 }
 
-// reconcileConfigIfDue 慢速配置对账。
-//
-// 固件可能自己退回原厂模式（休眠、Fn 键切灯效、被官方 HUB 抢），
-// 那时推帧照样"写成功"但进了关闭的通道 —— 只有回读配置能发现漂移。
-// 修复失联误报之前，这件事是靠误报每 11 秒重写配置"歪打正着"兜底的；
-// 误报修掉之后，用一分钟一次的只读对账把它正确地补上。
+// reconcileConfigIfDue 实读模式，只在发现漂移时使输出失效，不重置场景时钟。
 func (a *app) reconcileConfigIfDue(ctx context.Context, comp *engine.CompanionScene, pm *engine.PowerMonitor, last *time.Time) {
 	if time.Since(*last) < reconcileEvery {
 		return
 	}
 	*last = time.Now()
-
-	a.mu.Lock()
-	id := a.sceneID
-	sc := a.themeScene
-	a.mu.Unlock()
-	if id != "theme" && id != "" {
-		return // 别的场景有自己的配置语义（专注会写 blMode=0）
-	}
-	if sc == nil || !a.dev.Awake() {
+	if !a.dev.Awake() || (pm != nil && pm.Action() == engine.BlankAll) {
 		return
 	}
-	if pm != nil && pm.Action() != engine.KeepOn {
-		return // 熄屏期间键盘显示的是我们推的黑帧，对账无意义还可能戳醒它
-	}
-
-	wantBL := expectedBLMode(sc)
-	cfg, err := a.dev.ReadConfig(ctx)
-	if err != nil {
-		return // 读不到由上面的快路径（探活/重选口）去管
-	}
-	if cfg.DotMode() != proto.DotModeCustom || cfg.BLMode() != wantBL {
-		logf("设备模式漂移（blMode=%d 期望 %d，dotMode=%d），重新对账",
-			cfg.BLMode(), wantBL, cfg.DotMode())
-		a.dev.Invalidate()
-		a.reenterScene(comp)
-	}
-}
-
-// expectedBLMode 是主题场景期望的背光模式值：选了原厂灯效就是效果号，
-// 否则是逐键推流（254）。
-func expectedBLMode(sc *engine.ThemeScene) byte {
-	if sc != nil && sc.KBFirmware != nil {
-		return byte(sc.KBFirmware.ID)
-	}
-	return proto.BLModeStream
-}
-
-// reenterScene 在链路恢复后重进当前场景：重写设备模式、重推当前画面。
-func (a *app) reenterScene(comp *engine.CompanionScene) {
-	a.mu.Lock()
-	id := a.sceneID
-	a.mu.Unlock()
-	if err := a.switchScene(id, comp); err != nil {
-		logf("链路恢复后重进场景失败：%v", err)
+	before := a.dev.Generation()
+	if err := a.dev.Reconcile(ctx); err == nil && before != a.dev.Generation() {
+		a.eng.Notify()
 	}
 }
 
@@ -476,14 +387,26 @@ func sameStrings(a, b []string) bool {
 
 // switchScene 是所有场景切换的唯一入口。
 func (a *app) switchScene(id string, comp *engine.CompanionScene) error {
-	// 先校验再动记账：未知 id 或引擎切换失败都不能把 sceneID 弄脏，
-	// 否则托盘勾选项和 /api/state 撒谎。
+	a.transitionMu.Lock()
+	defer a.transitionMu.Unlock()
+	if id == "" {
+		id = "theme"
+	}
+	// 先校验，再串行发布场景选择。
 	switch id {
 	case "theme", "", "focus", "pomodoro", "companion":
 	default:
 		return fmt.Errorf("未知场景 %q", id)
 	}
 
+	before := a.st.Snapshot().Mode
+	a.st.Update(func(c *store.Settings) { c.Mode = id })
+	if before != id {
+		if err := a.st.Save(); err != nil {
+			a.st.Update(func(c *store.Settings) { c.Mode = before })
+			return err
+		}
+	}
 	a.mu.Lock()
 	sc := a.themeScene
 	a.mu.Unlock()
@@ -507,23 +430,21 @@ func (a *app) switchScene(id string, comp *engine.CompanionScene) error {
 	if err != nil {
 		return err
 	}
-	a.mu.Lock()
-	a.sceneID = id
-	a.mu.Unlock()
 	if a.api != nil {
-		a.api.SetSceneState(id)
+		a.api.Broadcast()
 	}
 	return nil
 }
 
-// switchTheme 重建主题场景。亮度、校准变了也走这里。
+// switchTheme 更新主题素材；亮度、校准通过全局输出管线更新。
 //
 // enter 区分两种意图：页面点主题（enter=true）是"我要看这个主题"，
 // 必须把引擎切进主题场景；内部重建（换灯效/点图案/伴侣透传跟随）
 // 只换素材，不打断用户正在看的场景。
-// 旧 bug：enter 语义混在 active 里 —— 场景不在 theme 时只把 sceneID
-// 记成 theme 却不切引擎，点阵要点第二下才动。
+// enter=false 仅更新素材，保留当前场景。
 func (a *app) switchTheme(id string, dynamic bool, enter bool) error {
+	a.transitionMu.Lock()
+	defer a.transitionMu.Unlock()
 	if _, ok := theme.ByID(id); !ok {
 		return fmt.Errorf("没有主题 %q", id)
 	}
@@ -534,13 +455,11 @@ func (a *app) switchTheme(id string, dynamic bool, enter bool) error {
 	if a.comp != nil {
 		a.comp.SetKeys(sc) // 伴侣透传的背光跟着新主题走
 	}
-	if enter {
-		a.sceneID = "theme"
-	}
-	active := a.sceneID == "theme" || a.sceneID == ""
+	active := enter || a.st.Snapshot().Mode == "theme" || a.st.Snapshot().Mode == ""
 	a.mu.Unlock()
 
 	if !active {
+		a.eng.Notify()
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -548,7 +467,10 @@ func (a *app) switchTheme(id string, dynamic bool, enter bool) error {
 	if err := a.eng.SetScene(ctx, sc); err != nil {
 		return err
 	}
-	a.api.SetSceneState("theme")
+	a.st.Update(func(c *store.Settings) { c.Mode = "theme" })
+	if a.api != nil {
+		a.api.Broadcast()
+	}
 	return nil
 }
 
@@ -557,17 +479,9 @@ func (a *app) newThemeScene(id string, dynamic bool) *engine.ThemeScene {
 	if !ok {
 		t = theme.Default()
 	}
-	// 配置读取全部在锁内：本函数会被 HTTP handler 的 goroutine 并发调
-	// （switchTheme / RebuildTheme / SetCalib），裸读 Settings 是数据竞争。
-	a.mu.Lock()
-	cal := a.cal
-	a.mu.Unlock()
-	sc := engine.NewThemeScene(t, dynamic, cal)
+	sc := engine.NewThemeScene(t, dynamic)
 	sc.KBLight = t.Light
 	a.st.View(func(st *store.Settings) {
-		sc.DotBright = st.Bright.Dot
-		sc.KBBright = st.Bright.Keys
-		sc.ApplyDotCalib = st.Calib.DotCalib
 		// 图案库单选：非空时点阵显示这张图案，背光仍走主题。
 		if st.Pattern != "" {
 			if p, ok := theme.PatternByID(st.Pattern); ok {
@@ -600,6 +514,7 @@ func (a *app) applyPattern(id string) error {
 
 // setKBEffect 切换原厂键盘灯效。id < 0 表示回到主题的逐键配色。
 func (a *app) setKBEffect(id int) error {
+	before := a.st.Snapshot().KBEffect
 	a.mu.Lock()
 	a.st.Update(func(st *store.Settings) {
 		if id < 0 {
@@ -614,7 +529,8 @@ func (a *app) setKBEffect(id int) error {
 	a.mu.Unlock()
 
 	if err := a.st.Save(); err != nil {
-		logf("保存配置失败：%v", err)
+		a.st.Update(func(c *store.Settings) { c.KBEffect = before })
+		return err
 	}
 	if sc == nil {
 		return nil
@@ -622,17 +538,7 @@ func (a *app) setKBEffect(id int) error {
 	if err := a.switchTheme(sc.Theme.ID, sc.Dynamic, false); err != nil {
 		return err
 	}
-	// 伴侣的背光是从主题场景透传的：switchTheme(enter=false) 只换了帧源，
-	// 背光模式（固件效果号 / 254 推流）只有场景 Enter 才写进设备。
-	// 不重进伴侣：选固件灯效 = 推流帧停了、模式还是 254，键盘冻在最后一帧；
-	// 切回主题配色 = 帧恢复推、模式却是固件效果，帧全被忽略。
-	// 专注/番茄钟的背光语义自管（全灭/自推帧），下次进场景时自然带上。
-	a.mu.Lock()
-	scene, comp := a.sceneID, a.comp
-	a.mu.Unlock()
-	if scene == "companion" && comp != nil {
-		return a.switchScene("companion", comp)
-	}
+	a.eng.Notify()
 	return nil
 }
 
@@ -655,10 +561,10 @@ func (a *app) pomodoroLoop(ctx context.Context) {
 			// 只在切场景时广播的话，页面时钟会冻在 00:00。
 			if a.pomo.IsAlerting() {
 				a.mu.Lock()
-				cur := a.sceneID
+				cur := a.st.Snapshot().Mode
 				a.mu.Unlock()
 				if cur != "pomodoro" {
-					_ = a.switchScene("pomodoro", a.comp)
+					_ = a.controlScene("pomodoro", a.comp)
 				}
 			}
 			a.api.Broadcast()
@@ -683,4 +589,16 @@ func exePath() string {
 		return "yogod.exe"
 	}
 	return filepath.ToSlash(exe)
+}
+
+// applyOutput 仅发布参数，不重建场景、不执行 HID IO。
+func (a *app) applyOutput() {
+	c := a.st.Snapshot()
+	a.eng.SetOutput(engine.Output{Cal: color.Calibration{Gain: c.Calib.Gain, Corr: c.Calib.Corr, Sat: c.Calib.Sat, EQL: c.Calib.EQL}, DotBright: c.Bright.Dot, KBBright: c.Bright.Keys, DotCalib: c.Calib.DotCalib, Enabled: engine.Channels{Matrix: c.Outputs.Dot, Keys: c.Outputs.Keys}, Rate: device.RateTier(c.RateTier)})
+}
+
+func (a *app) controlScene(id string, comp *engine.CompanionScene) error {
+	a.controlMu.Lock()
+	defer a.controlMu.Unlock()
+	return a.switchScene(id, comp)
 }

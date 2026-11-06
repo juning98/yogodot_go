@@ -5,16 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wednesque/yogod/internal/frame"
 	"github.com/wednesque/yogod/internal/proto"
 )
-
-// matrixWithFirstPixel 造一帧只改第一个字节的点阵，用来验证限速。
-func matrixWithFirstPixel(v byte) frame.Matrix {
-	var m frame.Matrix
-	m[0] = v
-	return m
-}
 
 // openOrSkip 连上键盘，没有就跳过。
 //
@@ -143,36 +135,4 @@ func containsDongle(s string) bool {
 		}
 	}
 	return false
-}
-
-// TestThrottleOnDevice 验证限速确实挡下了过快的帧。
-//
-// 注意：这个测试**会**往键盘写帧（点阵），但写的是当前画面的重复帧，
-// 而且立刻被去重/限速挡下，不会造成可见变化。
-func TestThrottleOnDevice(t *testing.T) {
-	c := openOrSkip(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// 连发 20 帧，只有很少几帧能真的出去
-	before := c.Status().Dropped
-	okCount := 0
-	for i := 0; i < 20; i++ {
-		res, err := c.SendMatrix(ctx, matrixWithFirstPixel(byte(i)))
-		if err != nil {
-			t.Fatalf("SendMatrix: %v", err)
-		}
-		if res.Sent {
-			okCount++
-		}
-	}
-	after := c.Status().Dropped
-
-	if okCount == 20 {
-		t.Fatalf("20 帧全发出去了 —— 限速没生效")
-	}
-	if after <= before {
-		t.Fatalf("dropped 计数没有增长：%d -> %d", before, after)
-	}
-	t.Logf("20 帧里写出去 %d 帧，挡下 %d 帧", okCount, after-before)
 }

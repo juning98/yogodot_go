@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/wednesque/yogod/internal/frame"
-	"github.com/wednesque/yogod/internal/proto"
 )
 
 // BenchStep 是爬坡测试一档的统计。
@@ -35,19 +34,19 @@ const maxBenchFailStreak = 3
 
 // BenchKeys 以目标帧率推 frames 帧键盘灯。
 //
-// 它刻意绕过 SendKeys 的限速/去重/打字让路 —— 这是压力测试，
+// 它刻意绕过 Engine 的限速/去重/打字让路 —— 这是压力测试，
 // 量的就是链路与固件的真实承受力，不是日常行为。
 // gen(i) 生成第 i 帧，应当帧帧不同，方便肉眼判断哪一档开始撕裂。
 func (c *Controller) BenchKeys(ctx context.Context, fps float64, frames int, gen func(i int) frame.Keys) BenchStep {
 	return c.bench(ctx, fps, frames, func(i int) error {
-		return c.writeKeys(ctx, gen(i))
+		return c.SendKeys(ctx, gen(i))
 	})
 }
 
 // BenchMatrix 同 BenchKeys，推点阵帧。
 func (c *Controller) BenchMatrix(ctx context.Context, fps float64, frames int, gen func(i int) frame.Matrix) BenchStep {
 	return c.bench(ctx, fps, frames, func(i int) error {
-		return c.writeMatrix(ctx, gen(i))
+		return c.SendMatrix(ctx, gen(i))
 	})
 }
 
@@ -98,7 +97,7 @@ func (c *Controller) bench(ctx context.Context, fps float64, frames int, write f
 
 	// 档位结束探活：设备还接得上话吗？
 	// 写是单向的，固件被灌死时写调用照样返回成功，只有要回包的命令能试出来。
-	b, err := c.transact(ctx, proto.NewLen(proto.CmdPowerInfo, 0, 0, nil), true)
+	b, err := c.Power(ctx, true)
 	st.ProbeOK = err == nil && b != nil
 	return st
 }
