@@ -60,7 +60,7 @@ func TestEachCellVisitsEveryLED(t *testing.T) {
 func TestGridIsRowMajor(t *testing.T) {
 	var g Grid
 	// 只点亮 (2,3)，它在字节偏移 (2*6+3)*3 = 45
-	g[2][3] = color.RGB{255, 0, 0}
+	g[2][3] = color.RGBFloat{255, 0, 0}
 
 	cal := color.DefaultCalibration()
 	m := g.Encode(cal, 100, false)
@@ -133,7 +133,7 @@ func TestSetGetRespectGaps(t *testing.T) {
 // TestEncodeRespectsBrightness 确认亮度是线性缩放（点阵默认不校正）。
 func TestEncodeRespectsBrightness(t *testing.T) {
 	var g Grid
-	g[0][0] = color.RGB{200, 100, 50}
+	g[0][0] = color.RGBFloat{200, 100, 50}
 
 	full := g.Encode(color.DefaultCalibration(), 100, false)
 	half := g.Encode(color.DefaultCalibration(), 50, false)

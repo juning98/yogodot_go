@@ -45,7 +45,7 @@ func invaderDot(t float64) frame.Grid {
 			}
 			col := DotColor(ch)
 			if ch == 'G' {
-				col = color.Mix(color.RGB{}, col, shine)
+				col = color.MixFloat(color.RGBFloat{}, col, shine)
 			}
 			g[r][cc] = col
 		}

@@ -251,11 +251,6 @@ func (e *Engine) Pump(ctx context.Context) error {
 				}
 				e.dropped.Add(1)
 			}
-			// 顺带补发被限速挡下的帧。
-			// 熄屏期间不补发 —— 否则会把熄屏前那帧旧画面推回去，把黑帧盖掉。
-			if act == KeepOn {
-				e.sink.FlushPending(ctx)
-			}
 		}
 	}
 }
@@ -288,6 +283,12 @@ func (e *Engine) Drain(ctx context.Context) error {
 			return ctx.Err()
 		case r := <-e.out:
 			e.write(ctx, r)
+			// 补发也属于设备 IO，必须与正常帧共用这个写循环。
+			// 从 Pump 补发会阻塞时钟，并让两帧的 HID 分包交错。
+			// 熄屏期间不补旧画面，避免覆盖黑帧。
+			if e.power == nil || e.power.Action() == KeepOn {
+				e.sink.FlushPending(ctx)
+			}
 		}
 	}
 }

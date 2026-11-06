@@ -35,7 +35,7 @@ func Plasma(t float64) frame.Grid {
 			v := math.Sin(float64(c)*0.9+t*2) +
 				math.Sin(float64(r)*0.9-t*1.5) +
 				math.Sin(float64(c+r)*0.6+t*2.5)
-			g[r][c] = color.HSV(v*55+t*45, 1, 0.45+0.55*math.Abs(math.Sin(v*1.2)))
+			g[r][c] = color.HSVFloat(v*55+t*45, 1, 0.45+0.55*math.Abs(math.Sin(v*1.2)))
 		}
 	}
 	return g
@@ -47,14 +47,14 @@ func Comet(t float64) frame.Grid {
 	n := len(ring)
 	for k := 0; k < 9; k++ {
 		p := ring[idx(int(math.Floor(t*15))-k, n)]
-		g[p[0]][p[1]] = color.HSV(190+float64(k)*14, 1, math.Pow(1-float64(k)/9, 2.2))
+		g[p[0]][p[1]] = color.HSVFloat(190+float64(k)*14, 1, math.Pow(1-float64(k)/9, 2.2))
 	}
 	b := 0.25 + 0.75*math.Abs(math.Sin(t*3.5))
 	for _, p := range [][2]int{{2, 2}, {2, 3}, {3, 2}, {3, 3}} {
-		g[p[0]][p[1]] = color.RGB{
-			color.Clamp(90 * b),
-			color.Clamp(200 * b),
-			color.Clamp(255 * b),
+		g[p[0]][p[1]] = color.RGBFloat{
+			color.ClampFloat(90 * b),
+			color.ClampFloat(200 * b),
+			color.ClampFloat(255 * b),
 		}
 	}
 	return g
@@ -80,10 +80,10 @@ func Heartbeat(t float64) frame.Grid {
 	for r := 0; r < frame.DotRows; r++ {
 		for c := 0; c < frame.DotCols && c < len(art[r]); c++ {
 			if art[r][c] == 'r' {
-				g[r][c] = color.RGB{
-					color.Clamp(255 * b),
-					color.Clamp(35 * b),
-					color.Clamp(45 * b),
+				g[r][c] = color.RGBFloat{
+					color.ClampFloat(255 * b),
+					color.ClampFloat(35 * b),
+					color.ClampFloat(45 * b),
 				}
 			}
 		}
@@ -119,10 +119,10 @@ func (f *Fire) Step() frame.Grid {
 	for r := 0; r < frame.DotRows; r++ {
 		for c := 0; c < frame.DotCols; c++ {
 			v := math.Min(1, f.buf[r][c])
-			g[r][c] = color.RGB{
-				color.Clamp(v * 3 * 255),
-				color.Clamp(math.Max(0, v-0.34) * 3.4 * 255),
-				color.Clamp(math.Max(0, v-0.78) * 4.5 * 255),
+			g[r][c] = color.RGBFloat{
+				color.ClampFloat(v * 3 * 255),
+				color.ClampFloat(math.Max(0, v-0.34) * 3.4 * 255),
+				color.ClampFloat(math.Max(0, v-0.78) * 4.5 * 255),
 			}
 		}
 	}
@@ -147,10 +147,10 @@ func Rain(t float64) frame.Grid {
 		for k := 0; k < 3; k++ {
 			r := int(math.Floor(y)) - k
 			if r >= 0 && r < frame.DotRows {
-				g[r][c] = color.RGB{
+				g[r][c] = color.RGBFloat{
 					0,
-					color.Clamp(120 * (1 - float64(k)/3)),
-					color.Clamp(255 * (1 - float64(k)/3)),
+					color.ClampFloat(120 * (1 - float64(k)/3)),
+					color.ClampFloat(255 * (1 - float64(k)/3)),
 				}
 			}
 		}
@@ -161,7 +161,7 @@ func Rain(t float64) frame.Grid {
 // Breathe 是整屏同色呼吸，色相随时间慢慢转。
 func Breathe(t float64) frame.Grid {
 	b := 0.15 + 0.85*(0.5+0.5*math.Sin(t*1.6))
-	col := color.HSV(t*24, 0.85, b)
+	col := color.HSVFloat(t*24, 0.85, b)
 	var g frame.Grid
 	for r := 0; r < frame.DotRows; r++ {
 		for c := 0; c < frame.DotCols; c++ {
@@ -181,7 +181,7 @@ func Spiral(t float64) frame.Grid {
 			a := math.Atan2(dy, dx)
 			d := math.Hypot(dx, dy)
 			phase := math.Abs(math.Mod(d*1.6-t*2.4, 2.2) - 1.1)
-			g[r][c] = color.HSV(a*57+d*70-t*160, 1, math.Max(0, 1-phase))
+			g[r][c] = color.HSVFloat(a*57+d*70-t*160, 1, math.Max(0, 1-phase))
 		}
 	}
 	return g

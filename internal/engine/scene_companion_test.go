@@ -100,9 +100,9 @@ func TestCompanionStateColors(t *testing.T) {
 		"idle": agent.StateIdle, "busy": agent.StateBusy, "wait": agent.StateWait,
 		"ask": agent.StateAsk, "done": agent.StateDone, "error": agent.StateError,
 	} {
-		g := compFrame("claude-code", crab, st, compColor[st], 0, 0)
-		if c := g[2][0]; !sameHue(c, compColor[st]) {
-			t.Errorf("%s: 色相不对，得到 %v，期望 %v 的缩放", name, c, compColor[st])
+		g := compFrame("claude-code", crab, st, compColor[st].Float(), 0, 0)
+		if c := g[2][0]; !sameHue(c, compColor[st].Float()) {
+			t.Errorf("%s: 色相不对，得到 %v，期望 %v 的缩放", name, c, compColor[st].Float())
 		}
 	}
 }
@@ -113,16 +113,16 @@ func TestCompanionEyesFollowStateColor(t *testing.T) {
 		"busy": agent.StateBusy, "wait": agent.StateWait,
 		"ask": agent.StateAsk, "error": agent.StateError,
 	} {
-		g := compFrame("claude-code", crab, st, compColor[st], 0.06, 0.06)
-		if c := g[0][1]; !sameHue(c, compColor[st]) {
-			t.Errorf("%s: 眼睛应是状态色 %v 的缩放，得到 %v", name, compColor[st], c)
+		g := compFrame("claude-code", crab, st, compColor[st].Float(), 0.06, 0.06)
+		if c := g[0][1]; !sameHue(c, compColor[st].Float()) {
+			t.Errorf("%s: 眼睛应是状态色 %v 的缩放，得到 %v", name, compColor[st].Float(), c)
 		}
 	}
 }
 
 // 执行中：流光在动 —— 三种扫法，不同时刻帧都必须不同。
 func TestCompanionBusyWaveFlows(t *testing.T) {
-	col := compColor[agent.StateBusy]
+	col := compColor[agent.StateBusy].Float()
 	for name, cells := range map[string]compCells{
 		"claude-code": crab, "codex": compCellsByName["codex"], "opencode": compCellsByName["opencode"],
 	} {
@@ -134,7 +134,7 @@ func TestCompanionBusyWaveFlows(t *testing.T) {
 	}
 	// OpenCode 行扫描：高亮行确实在往下滚
 	door := compCellsByName["opencode"]
-	litRow := func(g [6][6]color.RGB) int {
+	litRow := func(g [6][6]color.RGBFloat) int {
 		best, bestLum := -1, -1.0
 		for r := 0; r < 6; r++ {
 			if l := lum(g[r][0]); l > bestLum {
@@ -151,7 +151,7 @@ func TestCompanionBusyWaveFlows(t *testing.T) {
 
 // 等你授权：双跳心跳 —— 两个峰、谷底拉得开，眼睛在拍点上亮白。
 func TestCompanionWaitHeartbeat(t *testing.T) {
-	col := compColor[agent.StateWait]
+	col := compColor[agent.StateWait].Float()
 	peak1 := compFrame("claude-code", crab, agent.StateWait, col, 0.065, 0)
 	rest := compFrame("claude-code", crab, agent.StateWait, col, 0.60, 0)
 	peak2 := compFrame("claude-code", crab, agent.StateWait, col, 0.25, 0)
@@ -165,7 +165,7 @@ func TestCompanionWaitHeartbeat(t *testing.T) {
 
 // 等你补充：三连轻叩，一波弱过一波；形状原地不动（不晃）。
 func TestCompanionAskTripleKnock(t *testing.T) {
-	col := compColor[agent.StateAsk]
+	col := compColor[agent.StateAsk].Float()
 	k1 := compFrame("claude-code", crab, agent.StateAsk, col, 0.07, 0)
 	gap := compFrame("claude-code", crab, agent.StateAsk, col, 0.60, 0)
 	k3 := compFrame("claude-code", crab, agent.StateAsk, col, 0.41, 0)
@@ -178,7 +178,7 @@ func TestCompanionAskTripleKnock(t *testing.T) {
 	// 不晃：两次叩点亮的是同一组格子
 	for r := 0; r < 6; r++ {
 		for c := 0; c < 6; c++ {
-			if (k1[r][c] != (color.RGB{})) != (k3[r][c] != (color.RGB{})) {
+			if (k1[r][c] != (color.RGBFloat{})) != (k3[r][c] != (color.RGBFloat{})) {
 				t.Fatalf("格子 (%d,%d) 一闪一灭 —— 形状在晃", r, c)
 			}
 		}
@@ -187,7 +187,7 @@ func TestCompanionAskTripleKnock(t *testing.T) {
 
 // 完成：亮一下（指数衰减），光晕从中心荡过形状后稳定；6 秒停留结束退回空闲。
 func TestCompanionDoneBloomsThenSettles(t *testing.T) {
-	col := compColor[agent.StateDone]
+	col := compColor[agent.StateDone].Float()
 	fresh := compFrame("claude-code", crab, agent.StateDone, col, 0, 0.05)
 	settled := compFrame("claude-code", crab, agent.StateDone, col, 0, 3.0)
 	if lum(fresh[2][2]) <= lum(settled[2][2])*1.4 {
@@ -201,7 +201,7 @@ func TestCompanionDoneBloomsThenSettles(t *testing.T) {
 	// 不摆字形：绽放前后亮的是同一组格子（螃蟹自己）
 	for r := 0; r < 6; r++ {
 		for c := 0; c < 6; c++ {
-			if (fresh[r][c] != (color.RGB{})) != (settled[r][c] != (color.RGB{})) {
+			if (fresh[r][c] != (color.RGBFloat{})) != (settled[r][c] != (color.RGBFloat{})) {
 				t.Fatalf("格子 (%d,%d) 一亮一灭 —— 形状换了", r, c)
 			}
 		}
@@ -219,7 +219,7 @@ func TestCompanionDoneBloomsThenSettles(t *testing.T) {
 
 // 出错：警示双闪 —— 急两声、长一息；不摆字形。
 func TestCompanionErrorDoubleBlink(t *testing.T) {
-	col := compColor[agent.StateError]
+	col := compColor[agent.StateError].Float()
 	on1 := compFrame("claude-code", crab, agent.StateError, col, 0, 0.06)
 	gap := compFrame("claude-code", crab, agent.StateError, col, 0, 0.155)
 	on2 := compFrame("claude-code", crab, agent.StateError, col, 0, 0.25)
@@ -233,7 +233,7 @@ func TestCompanionErrorDoubleBlink(t *testing.T) {
 	// 不摆字形：亮格集合始终是螃蟹
 	for r := 0; r < 6; r++ {
 		for c := 0; c < 6; c++ {
-			if (on1[r][c] != (color.RGB{})) != (crabAt(r, c)) {
+			if (on1[r][c] != (color.RGBFloat{})) != (crabAt(r, c)) {
 				t.Fatalf("格子 (%d,%d) 不属于螃蟹形状 —— 出现字形", r, c)
 			}
 		}
@@ -247,17 +247,17 @@ func crabAt(r, c int) bool {
 
 // 空闲：Claude 会眨眼 —— 眨眼窗口内眼睛灭、身体亮。
 func TestCompanionIdleBlink(t *testing.T) {
-	col := compColor[agent.StateIdle]
+	col := compColor[agent.StateIdle].Float()
 	open := compFrame("claude-code", crab, agent.StateIdle, col, 3.0, 0)
 	shut := compFrame("claude-code", crab, agent.StateIdle, col, 0.1, 0) // mod 6.4 = 0.1 < 0.28 → 眨眼
 	eye := [2]int{0, 1}                                                  // 'e' 格
-	if open[eye[0]][eye[1]] == (color.RGB{}) {
+	if open[eye[0]][eye[1]] == (color.RGBFloat{}) {
 		t.Fatal("不眨眼时眼睛应亮着")
 	}
-	if shut[eye[0]][eye[1]] != (color.RGB{}) {
+	if shut[eye[0]][eye[1]] != (color.RGBFloat{}) {
 		t.Error("眨眼窗口内眼睛应熄灭")
 	}
-	if shut[2][2] == (color.RGB{}) {
+	if shut[2][2] == (color.RGBFloat{}) {
 		t.Error("眨眼只灭眼睛，身体不能跟着灭")
 	}
 }
@@ -284,20 +284,20 @@ func TestCompanionIdleAgentChoice(t *testing.T) {
 }
 
 // firstLit 找帧里第一个亮格。
-func firstLit(g [6][6]color.RGB) (color.RGB, bool) {
+func firstLit(g [6][6]color.RGBFloat) (color.RGBFloat, bool) {
 	for r := 0; r < 6; r++ {
 		for c := 0; c < 6; c++ {
-			if g[r][c] != (color.RGB{}) {
+			if g[r][c] != (color.RGBFloat{}) {
 				return g[r][c], true
 			}
 		}
 	}
-	return color.RGB{}, false
+	return color.RGBFloat{}, false
 }
 
 // sameHue 判断 a 是否就是 b 的整体变亮/变暗（色相一致）：
 // b 的零通道 a 必须也是零，非零通道共享同一个缩放（容差取整误差）。
-func sameHue(a, b color.RGB) bool {
+func sameHue(a, b color.RGBFloat) bool {
 	scale := -1.0
 	for i := 0; i < 3; i++ {
 		if b[i] == 0 {
@@ -318,7 +318,7 @@ func sameHue(a, b color.RGB) bool {
 	return scale > 0
 }
 
-func lum(c color.RGB) float64 {
+func lum(c color.RGBFloat) float64 {
 	return 0.3*float64(c[0]) + 0.6*float64(c[1]) + 0.1*float64(c[2])
 }
 
@@ -355,10 +355,10 @@ func TestCompanionIdleBreathesToWhite(t *testing.T) {
 		return n
 	}
 	// t=1.75 是 7 秒周期的 sin 波峰（br=1.0），波谷在 5.25。
-	if white(compFrame("generic", gem, agent.StateIdle, compColor[agent.StateIdle], 1.75, 0)) == 0 {
+	if white(compFrame("generic", gem, agent.StateIdle, compColor[agent.StateIdle].Float(), 1.75, 0)) == 0 {
 		t.Fatal("空闲呼吸的吸气顶应到纯白")
 	}
-	if white(compFrame("generic", gem, agent.StateIdle, compColor[agent.StateIdle], 5.25, 0)) > 0 {
+	if white(compFrame("generic", gem, agent.StateIdle, compColor[agent.StateIdle].Float(), 5.25, 0)) > 0 {
 		t.Fatal("空闲呼吸的呼气不该顶到纯白（呼吸幅度不能丢）")
 	}
 }

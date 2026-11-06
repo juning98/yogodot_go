@@ -74,7 +74,12 @@ func (s *ThemeScene) Frame(t time.Duration) Render {
 		l = s.Theme.KBFrames()
 	}
 
-	m := g.Encode(s.Cal, s.DotBright, s.ApplyDotCalib)
+	var m frame.Matrix
+	if s.Dynamic && s.Pattern == nil {
+		m = g.EncodeAnimated(s.Cal, s.DotBright, s.ApplyDotCalib)
+	} else {
+		m = g.Encode(s.Cal, s.DotBright, s.ApplyDotCalib)
+	}
 	// 预览帧直通原色：校准（白平衡/EQL 限流/饱和度补偿）和亮度都是给
 	// 灯珠的电气补偿，屏幕不需要 —— 页面显示主题本来的颜色。
 	pm := g.Encode(s.Cal, 100, false)
@@ -94,6 +99,10 @@ func (s *ThemeScene) Frame(t time.Duration) Render {
 // 而不是像旧版那样"缓存住就算数"。成本是三次配置写入，
 // 收益是键盘休眠/被别人抢过之后能自己恢复。
 func (s *ThemeScene) Enter(ctx context.Context, ctrl *device.Controller) error {
+	// 与官方自定义点阵会话保持一致：先结束旧同步，再写模式并开始推帧。
+	if err := ctrl.EndDotSync(ctx); err != nil {
+		return err
+	}
 	patch := proto.Patch{
 		proto.OffBLBright:   90,
 		proto.OffBLColorful: 0,

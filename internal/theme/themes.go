@@ -12,7 +12,7 @@ import (
    静态模式：两边都定格；动态模式：两边一起动。                       */
 
 // eachDot 造一帧点阵：对 36 个格子逐个问颜色。
-func eachDot(fn func(r, c int) color.RGB) frame.Grid {
+func eachDot(fn func(r, c int) color.RGBFloat) frame.Grid {
 	var g frame.Grid
 	for r := 0; r < frame.DotRows; r++ {
 		for c := 0; c < frame.DotCols; c++ {
@@ -26,11 +26,7 @@ func eachDot(fn func(r, c int) color.RGB) frame.Grid {
 func scaled(g frame.Grid, k float64) frame.Grid {
 	for r := 0; r < frame.DotRows; r++ {
 		for c := 0; c < frame.DotCols; c++ {
-			g[r][c] = color.RGB{
-				color.Clamp(float64(g[r][c][0]) * k),
-				color.Clamp(float64(g[r][c][1]) * k),
-				color.Clamp(float64(g[r][c][2]) * k),
-			}
+			g[r][c] = color.ScaleFloat(g[r][c], k)
 		}
 	}
 	return g
@@ -129,9 +125,9 @@ var weathers = []weatherFrame{
 			for c := 0; c < frame.DotCols; c++ {
 				d := math.Hypot(float64(c)-2.5, float64(r)-2.5)
 				if d < R {
-					g[r][c] = color.RGB{255, 205, 40}
+					g[r][c] = color.RGBFloat{255, 205, 40}
 				} else if d < R+1.15 && (math.Abs(float64(c)-2.5) < 0.6 || math.Abs(float64(r)-2.5) < 0.6) {
-					g[r][c] = color.RGB{255, 160, 20}
+					g[r][c] = color.RGBFloat{255, 160, 20}
 				}
 			}
 		}
@@ -144,10 +140,10 @@ var weathers = []weatherFrame{
 			for k := 0; k < 2; k++ {
 				r := int(math.Floor(y)) - k
 				if r >= 0 && r < frame.DotRows {
-					g[r][c] = color.RGB{
+					g[r][c] = color.RGBFloat{
 						40,
-						color.Clamp(150 * (1 - float64(k)/2)),
-						color.Clamp(240 * (1 - float64(k)/2)),
+						color.ClampFloat(150 * (1 - float64(k)/2)),
+						color.ClampFloat(240 * (1 - float64(k)/2)),
 					}
 				}
 			}
@@ -158,7 +154,7 @@ var weathers = []weatherFrame{
 		g := frame.BlankGrid()
 		for c := 0; c < frame.DotCols; c++ {
 			for r := 0; r < 2; r++ {
-				g[r][c] = color.RGB{70, 70, 110}
+				g[r][c] = color.RGBFloat{70, 70, 110}
 			}
 		}
 		if math.Mod(t, 1.4) < 0.18 {
@@ -166,7 +162,7 @@ var weathers = []weatherFrame{
 			for r := 0; r < len(bolts); r++ {
 				for c := 0; c < frame.DotCols && c < len(bolts[r]); c++ {
 					if bolts[r][c] == 'X' && r+1 < frame.DotRows {
-						g[r+1][c] = color.RGB{255, 245, 180}
+						g[r+1][c] = color.RGBFloat{255, 245, 180}
 					}
 				}
 			}
@@ -178,7 +174,7 @@ var weathers = []weatherFrame{
 		for c := 0; c < frame.DotCols; c++ {
 			r := int(math.Floor(math.Mod(t*1.8+float64(c)*2.3, 8)))
 			if r >= 0 && r < frame.DotRows {
-				g[r][c] = color.RGB{170, 210, 245}
+				g[r][c] = color.RGBFloat{170, 210, 245}
 			}
 		}
 		return g
@@ -214,9 +210,9 @@ func buildAll() []Theme {
 				twitch := ph > 1.05 && ph < 1.38
 				blink := ph > 2.30 && ph < 2.54
 				spark := ph > 3.15 && ph < 3.78
-				Y := color.RGB{255, 205, 0}
-				R := color.RGB{255, 58, 58}
-				W := color.RGB{255, 246, 186}
+				Y := color.RGBFloat{255, 205, 0}
+				R := color.RGBFloat{255, 58, 58}
+				W := color.RGBFloat{255, 246, 186}
 				g := frame.BlankGrid()
 				eL, eR := 1, 4
 				if twitch { // 耳朵抖一下
@@ -230,8 +226,8 @@ func buildAll() []Theme {
 					g[3][c] = Y
 				}
 				if !blink { // 睁眼时挖出眼珠
-					g[2][1] = color.RGB{}
-					g[2][4] = color.RGB{}
+					g[2][1] = color.RGBFloat{}
+					g[2][4] = color.RGBFloat{}
 				}
 				g[3][0] = R // 腮红
 				g[3][5] = R
@@ -244,10 +240,10 @@ func buildAll() []Theme {
 				}
 				if spark { // 腮红噼啪放电
 					k := 0.35 + 0.65*math.Abs(math.Sin(t*38))
-					g[3][0] = color.Mix(R, W, k)
-					g[3][5] = color.Mix(R, W, k)
-					g[2][0] = color.Mix(Y, W, k*0.8)
-					g[2][5] = color.Mix(Y, W, k*0.8)
+					g[3][0] = color.MixFloat(R, W, k)
+					g[3][5] = color.MixFloat(R, W, k)
+					g[2][0] = color.MixFloat(Y, W, k*0.8)
+					g[2][5] = color.MixFloat(Y, W, k*0.8)
 				}
 				return g
 			},
@@ -261,9 +257,9 @@ func buildAll() []Theme {
 			// 之前头部两行用了奶白 [242,228,210]，在灯上就是一顶白帽子。
 			DotAnim: func(t float64) frame.Grid {
 				b := 0.75 + 0.25*math.Sin(t*1.8)
-				HEAD := color.RGB{255, 158, 45}
-				BODY := color.RGB{255, 100, 0}
-				TENT := color.RGB{196, 58, 0}
+				HEAD := color.RGBFloat{255, 158, 45}
+				BODY := color.RGBFloat{255, 100, 0}
+				TENT := color.RGBFloat{196, 58, 0}
 				g := frame.BlankGrid()
 				rows := [4]string{"..oo..", ".oooo.", "o.oo.o", "oooooo"}
 				for r := 0; r < 4; r++ {
@@ -275,15 +271,15 @@ func buildAll() []Theme {
 						if r < 2 {
 							col = HEAD
 						}
-						g[r][c] = color.Mix(color.RGB{}, col, b)
+						g[r][c] = color.MixFloat(color.RGBFloat{}, col, b)
 					}
 				}
 				for c := 0; c < 6; c++ { // 两行触手错相摆动
 					s := math.Sin(t*3.4 + float64(c)*1.1)
 					if s > 0 {
-						g[4][c] = color.Mix(color.RGB{}, TENT, 0.5+0.5*s)
+						g[4][c] = color.MixFloat(color.RGBFloat{}, TENT, 0.5+0.5*s)
 					} else {
-						g[5][c] = color.Mix(color.RGB{}, TENT, 0.5-0.5*s)
+						g[5][c] = color.MixFloat(color.RGBFloat{}, TENT, 0.5-0.5*s)
 					}
 				}
 				return g
@@ -295,16 +291,16 @@ func buildAll() []Theme {
 			// 张嘴闭嘴
 			DotAnim: func(t float64) frame.Grid {
 				open := (math.Sin(t*7) + 1) / 2
-				return eachDot(func(r, c int) color.RGB {
+				return eachDot(func(r, c int) color.RGBFloat {
 					dx := float64(c) - 2.5
 					dy := float64(r) - 2.5
 					if math.Hypot(dx, dy) > 3.1 {
-						return color.RGB{}
+						return color.RGBFloat{}
 					}
 					if math.Abs(math.Atan2(dy, dx)) < open*0.75 && dx > 0 {
-						return color.RGB{}
+						return color.RGBFloat{}
 					}
-					return color.RGB{255, 210, 0}
+					return color.RGBFloat{255, 210, 0}
 				})
 			},
 		},
@@ -314,12 +310,12 @@ func buildAll() []Theme {
 			DotAnim: func(t float64) frame.Grid {
 				g := DotFromArt([frame.DotRows]string{".bbbb.", "bllllb", "l.ll.l", "llrrll", "llllll", ".llll."})
 				if math.Mod(t, 3.4) > 3.1 { // 眨眼
-					g[2][1] = DotPalette['l']
-					g[2][4] = DotPalette['l']
+					g[2][1] = DotColor('l')
+					g[2][4] = DotColor('l')
 				}
 				b := 0.7 + 0.3*math.Sin(t*2.4)
-				g[3][2] = color.Mix(color.RGB{}, color.RGB{255, 45, 40}, b)
-				g[3][3] = color.Mix(color.RGB{}, color.RGB{255, 45, 40}, b)
+				g[3][2] = color.MixFloat(color.RGBFloat{}, color.RGBFloat{255, 45, 40}, b)
+				g[3][3] = color.MixFloat(color.RGBFloat{}, color.RGBFloat{255, 45, 40}, b)
 				return g
 			},
 		},
@@ -329,8 +325,8 @@ func buildAll() []Theme {
 			DotAnim: func(t float64) frame.Grid {
 				g := DotFromArt([frame.DotRows]string{".rrrr.", "rrrrrr", "rrrrrr", "ssSSss", "ssssss", ".ssss."})
 				b := 0.25 + 0.75*math.Pow(math.Abs(math.Sin(t*2.6)), 3)
-				g[3][2] = color.Mix(color.RGB{40, 40, 50}, color.RGB{255, 240, 200}, b)
-				g[3][3] = color.Mix(color.RGB{40, 40, 50}, color.RGB{255, 240, 200}, b)
+				g[3][2] = color.MixFloat(color.RGBFloat{40, 40, 50}, color.RGBFloat{255, 240, 200}, b)
+				g[3][3] = color.MixFloat(color.RGBFloat{40, 40, 50}, color.RGBFloat{255, 240, 200}, b)
 				return g
 			},
 		},
@@ -344,9 +340,9 @@ func buildAll() []Theme {
 			ID: "aurora", Name: "极光", Light: color.RGB{40, 210, 180},
 			Dot: [frame.DotRows]string{"..aa..", ".aGa..", "aGGaa.", ".aGGa.", "..aGa.", "...a.."},
 			DotAnim: func(t float64) frame.Grid {
-				return eachDot(func(r, c int) color.RGB {
+				return eachDot(func(r, c int) color.RGBFloat {
 					v := math.Sin(float64(c)*0.8+t*1.6) + math.Sin(float64(r)*1.1-t*1.1)
-					return color.HSV(150+v*38, 0.85, math.Max(0, 0.35+0.65*math.Sin(v*1.4+t)))
+					return color.HSVFloat(150+v*38, 0.85, math.Max(0, 0.35+0.65*math.Sin(v*1.4+t)))
 				})
 			},
 		},
@@ -360,9 +356,9 @@ func buildAll() []Theme {
 					for c := 0; c < 6; c++ {
 						d := math.Hypot((float64(c)-2.5)*0.9, float64(r)-y)
 						if d < 2.2 {
-							g[r][c] = color.Mix(color.RGB{255, 205, 80}, color.RGB{255, 90, 30}, d/2.2)
+							g[r][c] = color.MixFloat(color.RGBFloat{255, 205, 80}, color.RGBFloat{255, 90, 30}, d/2.2)
 						} else {
-							g[r][c] = color.Mix(color.RGB{70, 20, 60}, color.RGB{15, 8, 25},
+							g[r][c] = color.MixFloat(color.RGBFloat{70, 20, 60}, color.RGBFloat{15, 8, 25},
 								math.Min(1, float64(r)/5))
 						}
 					}
@@ -381,10 +377,10 @@ func buildAll() []Theme {
 					for k := 0; k < 3; k++ {
 						r := int(math.Floor(y)) - k
 						if r >= 0 && r < 6 {
-							g[r][c] = color.RGB{
+							g[r][c] = color.RGBFloat{
 								0,
-								color.Clamp(255 * (1 - float64(k)/3)),
-								color.Clamp(90 * (1 - float64(k)/3)),
+								color.ClampFloat(255 * (1 - float64(k)/3)),
+								color.ClampFloat(90 * (1 - float64(k)/3)),
 							}
 						}
 					}
@@ -404,9 +400,9 @@ func buildAll() []Theme {
 					for c := 0; c < 6; c++ {
 						switch m.Face[r][c] {
 						case 'X':
-							g[r][c] = m.Col
+							g[r][c] = m.Col.Float()
 						case 'o':
-							g[r][c] = color.Mix(color.RGB{}, m.Col, 0.35)
+							g[r][c] = color.MixFloat(color.RGBFloat{}, m.Col.Float(), 0.35)
 						}
 					}
 				}
@@ -427,12 +423,12 @@ func buildAll() []Theme {
 			DotAnim: func(t float64) frame.Grid {
 				g := DotFromArt([frame.DotRows]string{"o....o", "oooooo", "o.oo.o", "oOOOOo", "oO..Oo", ".OOOO."})
 				if math.Mod(t, 3.6) > 3.3 { // 眨眼
-					g[2][1] = DotPalette['o']
-					g[2][4] = DotPalette['o']
+					g[2][1] = DotColor('o')
+					g[2][4] = DotColor('o')
 				}
 				if math.Mod(t, 5) > 3.9 { // 吐舌
-					g[5][2] = color.RGB{255, 90, 120}
-					g[5][3] = color.RGB{255, 90, 120}
+					g[5][2] = color.RGBFloat{255, 90, 120}
+					g[5][3] = color.RGBFloat{255, 90, 120}
 				}
 				return g
 			},
@@ -443,13 +439,13 @@ func buildAll() []Theme {
 			DotAnim: func(t float64) frame.Grid {
 				g := DotFromArt([frame.DotRows]string{"s....s", "llllll", "lsllsl", "lsllsl", "llssll", ".llll."})
 				chew := math.Sin(t*4) > 0 // 嚼竹子
-				chewed := color.RGB{60, 62, 74}
+				chewed := color.RGBFloat{60, 62, 74}
 				if chew {
 					g[4][2] = chewed
 					g[4][3] = chewed
 				} else {
-					g[4][2] = DotPalette['l']
-					g[4][3] = DotPalette['l']
+					g[4][2] = DotColor('l')
+					g[4][3] = DotColor('l')
 				}
 				return g
 			},
@@ -475,16 +471,16 @@ func buildAll() []Theme {
 				for r := 0; r < 4; r++ {
 					for c := 0; c < 6; c++ {
 						if rows[r][c] == 'p' {
-							g[r][c] = color.Mix(color.RGB{}, color.RGB{235, 105, 215}, b)
+							g[r][c] = color.MixFloat(color.RGBFloat{}, color.RGBFloat{235, 105, 215}, b)
 						}
 					}
 				}
 				for c := 0; c < 6; c++ { // 触手飘
 					sw := math.Sin(t*3.1 + float64(c)*1.05)
 					if sw > 0 {
-						g[4][c] = color.Mix(color.RGB{}, color.RGB{150, 70, 240}, 0.45+0.55*sw)
+						g[4][c] = color.MixFloat(color.RGBFloat{}, color.RGBFloat{150, 70, 240}, 0.45+0.55*sw)
 					} else {
-						g[5][c] = color.Mix(color.RGB{}, color.RGB{150, 70, 240}, 0.45-0.55*sw)
+						g[5][c] = color.MixFloat(color.RGBFloat{}, color.RGBFloat{150, 70, 240}, 0.45-0.55*sw)
 					}
 				}
 				return g
@@ -495,12 +491,12 @@ func buildAll() []Theme {
 			Dot: [frame.DotRows]string{".....y", "..y...", "y....y", "...y..", ".y...y", "....y."},
 			// 星星各自闪
 			DotAnim: func(t float64) frame.Grid {
-				return eachDot(func(r, c int) color.RGB {
+				return eachDot(func(r, c int) color.RGBFloat {
 					ph := math.Sin(t*1.7 + float64(r*6+c)*2.399)
 					if ph > 0.72 {
-						return color.Mix(color.RGB{2, 4, 18}, color.RGB{255, 245, 210}, (ph-0.72)/0.28)
+						return color.MixFloat(color.RGBFloat{2, 4, 18}, color.RGBFloat{255, 245, 210}, (ph-0.72)/0.28)
 					}
-					return color.RGB{2, 4, 18}
+					return color.RGBFloat{2, 4, 18}
 				})
 			},
 		},
@@ -519,14 +515,14 @@ func buildAll() []Theme {
 					for c := 0; c < 6; c++ {
 						rr := r - up
 						if art[r][c] == 't' && rr >= 0 {
-							g[rr][c] = color.RGB{0, 235, 205}
+							g[rr][c] = color.RGBFloat{0, 235, 205}
 						}
 					}
 				}
 				for c := 0; c < 6; c++ { // 底部一条起伏的声波
 					h := math.Abs(math.Sin(t*4 + float64(c)*0.9))
 					if h > 0.55 {
-						g[5][c] = color.RGB{0, color.Clamp(200 * h), color.Clamp(180 * h)}
+						g[5][c] = color.RGBFloat{0, color.ClampFloat(200 * h), color.ClampFloat(180 * h)}
 					}
 				}
 				return g
@@ -567,17 +563,17 @@ func buildAll() []Theme {
 				g := DotFromArt([frame.DotRows]string{"..LL..", ".vvvv.", "vvvvvv", "vLvvLv", "vvvvvv", ".vvvv."})
 				rage := math.Mod(t, 6.5) > 5.3
 				b := 0.55 + 0.45*math.Abs(math.Sin(t*3.2))
-				dark := color.RGB{40, 10, 80}
-				green := color.RGB{60, 255, 0}
-				g[3][1] = color.Mix(dark, green, b)
-				g[3][4] = color.Mix(dark, green, b)
-				g[0][2] = color.Mix(dark, green, b)
-				g[0][3] = color.Mix(dark, green, b)
+				dark := color.RGBFloat{40, 10, 80}
+				green := color.RGBFloat{60, 255, 0}
+				g[3][1] = color.MixFloat(dark, green, b)
+				g[3][4] = color.MixFloat(dark, green, b)
+				g[0][2] = color.MixFloat(dark, green, b)
+				g[0][3] = color.MixFloat(dark, green, b)
 				if rage {
 					for r := 0; r < 6; r++ {
 						for c := 0; c < 6; c++ {
 							if g[r][c].Sum() > 20 {
-								g[r][c] = color.Mix(g[r][c], green, 0.55)
+								g[r][c] = color.MixFloat(g[r][c], green, 0.55)
 							}
 						}
 					}
@@ -597,7 +593,7 @@ func buildAll() []Theme {
 					x = 2 - ph
 				}
 				xi := int(math.Round(x*3)) + 1
-				cyan := color.RGB{0, 220, 255}
+				cyan := color.RGBFloat{0, 220, 255}
 				g[3][xi] = cyan
 				if xi+1 < 6 {
 					g[3][xi+1] = cyan
@@ -619,18 +615,18 @@ func buildAll() []Theme {
 						g := DotFromArt(b.Art)
 						for r := 0; r < 6; r++ {
 							for c := 0; c < 6; c++ {
-								g[r][c] = color.Mix(g[r][c], color.RGB{255, 255, 210}, f*0.85)
+								g[r][c] = color.MixFloat(g[r][c], color.RGBFloat{255, 255, 210}, f*0.85)
 							}
 						}
 						return g
 					}
 					e := (k - 0.72) / 0.28 // 爆炸：亮环向外扩
-					return eachDot(func(r, c int) color.RGB {
+					return eachDot(func(r, c int) color.RGBFloat {
 						d := math.Hypot(float64(c)-2.5, float64(r)-2.5)
 						if math.Abs(d-e*3.6) < 1.1 {
-							return color.Mix(color.RGB{255, 220, 60}, color.RGB{255, 80, 0}, e)
+							return color.MixFloat(color.RGBFloat{255, 220, 60}, color.RGBFloat{255, 80, 0}, e)
 						}
-						return color.RGB{}
+						return color.RGBFloat{}
 					})
 				}
 				return DotFromArt(b.Art)
@@ -657,10 +653,10 @@ func buildAll() []Theme {
 				for r := 0; r < 6; r++ {
 					for c := 0; c < 6; c++ {
 						if art[r][c] == 'r' {
-							g[r][c] = color.RGB{
-								color.Clamp(240 * b),
-								color.Clamp(40 * b),
-								color.Clamp(52 * b),
+							g[r][c] = color.RGBFloat{
+								color.ClampFloat(240 * b),
+								color.ClampFloat(40 * b),
+								color.ClampFloat(52 * b),
 							}
 						}
 					}

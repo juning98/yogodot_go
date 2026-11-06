@@ -155,16 +155,16 @@ func TestDotFromArtColours(t *testing.T) {
 	pika := DotFromArt(Default().Dot)
 	cases := []struct {
 		r, c int
-		want color.RGB
+		want color.RGBFloat
 		why  string
 	}{
-		{0, 1, color.RGB{255, 210, 0}, ".y..y. 里的 y"},
-		{0, 0, color.RGB{0, 0, 0}, ".y..y. 里的 ."},
-		{2, 1, color.RGB{0, 0, 0}, "y.yy.y 里挖掉的眼珠"},
-		{3, 0, color.RGB{255, 40, 30}, "ryyyyr 里的 r（腮红）"},
-		{3, 5, color.RGB{255, 40, 30}, "ryyyyr 右边的 r"},
-		{5, 0, color.RGB{0, 0, 0}, ".yyyy. 左边的 ."},
-		{5, 1, color.RGB{255, 210, 0}, ".yyyy. 里的 y"},
+		{0, 1, color.RGBFloat{255, 210, 0}, ".y..y. 里的 y"},
+		{0, 0, color.RGBFloat{0, 0, 0}, ".y..y. 里的 ."},
+		{2, 1, color.RGBFloat{0, 0, 0}, "y.yy.y 里挖掉的眼珠"},
+		{3, 0, color.RGBFloat{255, 40, 30}, "ryyyyr 里的 r（腮红）"},
+		{3, 5, color.RGBFloat{255, 40, 30}, "ryyyyr 右边的 r"},
+		{5, 0, color.RGBFloat{0, 0, 0}, ".yyyy. 左边的 ."},
+		{5, 1, color.RGBFloat{255, 210, 0}, ".yyyy. 里的 y"},
 	}
 	for _, tc := range cases {
 		if got := pika[tc.r][tc.c]; got != tc.want {
@@ -175,20 +175,20 @@ func TestDotFromArtColours(t *testing.T) {
 	// 换两套验证新增调色板字符：'L' = [60,255,0]，'g' = [40,220,60]，'m' = [255,120,0]。
 	eva, _ := ByID("eva01")
 	evaG := DotFromArt(eva.Dot)
-	if got, want := evaG[3][1], (color.RGB{60, 255, 0}); got != want {
+	if got, want := evaG[3][1], (color.RGBFloat{60, 255, 0}); got != want {
 		t.Errorf("eva01(3,1) = %v，要 %v（字符 L）", got, want)
 	}
 	mc, _ := ByID("minecraft")
 	mcG := DotFromArt(mc.Dot)
-	if got, want := mcG[1][1], (color.RGB{60, 255, 0}); got != want {
+	if got, want := mcG[1][1], (color.RGBFloat{60, 255, 0}); got != want {
 		t.Errorf("minecraft(1,1) = %v，要 %v（字符 L）", got, want)
 	}
-	if got, want := mcG[1][0], (color.RGB{40, 220, 60}); got != want {
+	if got, want := mcG[1][0], (color.RGBFloat{40, 220, 60}); got != want {
 		t.Errorf("minecraft(1,0) = %v，要 %v（字符 g）", got, want)
 	}
 	lava, _ := ByID("lava")
 	lavaG := DotFromArt(lava.Dot)
-	if got, want := lavaG[0][3], (color.RGB{255, 120, 0}); got != want {
+	if got, want := lavaG[0][3], (color.RGBFloat{255, 120, 0}); got != want {
 		t.Errorf("lava(0,3) = %v，要 %v（字符 m）", got, want)
 	}
 }
@@ -588,7 +588,7 @@ func TestDeepSeekTheme(t *testing.T) {
 	if th.Dot[0][3] != 'D' || th.Dot[0][4] != '.' || th.Dot[0][5] != 'D' {
 		t.Errorf("尾鳍顶上的凹口不对：%q", th.Dot[0])
 	}
-	if DotColor('D') != th.Light {
+	if DotColor('D') != th.Light.Float() {
 		t.Errorf("字符 D = %v，与主题主色 %v 不一致", DotColor('D'), th.Light)
 	}
 
@@ -607,7 +607,7 @@ func TestDeepSeekTheme(t *testing.T) {
 	if th.DotAnim(0)[0][3].Sum() == 0 || th.DotAnim(1.8)[0][3].Sum() != 0 || th.DotAnim(1.8)[0][2].Sum() == 0 {
 		t.Error("尾鳍没有摆动")
 	}
-	if got := th.DotAnim(1.8)[3][1]; got != (color.RGB{255, 255, 255}) {
+	if got := th.DotAnim(1.8)[3][1]; got != (color.RGBFloat{255, 255, 255}) {
 		t.Errorf("呼吸最暗时眼睛 = %v，要保持纯白", got)
 	}
 
@@ -705,7 +705,7 @@ func TestMushroomTheme(t *testing.T) {
 	if th.DotAnim(1.0)[0][2].Sum() != 0 {
 		t.Error("1 秒时还没有缩回土里")
 	}
-	if got := th.DotAnim(6.5)[1][1]; got != (color.RGB{255, 255, 255}) {
+	if got := th.DotAnim(6.5)[1][1]; got != (color.RGBFloat{255, 255, 255}) {
 		t.Errorf("长满时白点 = %v，要保持纯白", got)
 	}
 }

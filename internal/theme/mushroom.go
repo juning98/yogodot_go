@@ -71,14 +71,14 @@ func mushroomDot(t float64) frame.Grid {
 		}
 		left := (6 - width) / 2
 		for c := left; c < left+width; c++ {
-			g[top+i][c] = color.Scale(DotColor('r'), b)
+			g[top+i][c] = color.ScaleFloat(DotColor('r'), b)
 		}
 	}
 
 	// 白点只在长满前三层、并且快长成时浮出来。
 	if capH == 3 && gr > 0.85 {
 		k := math.Min(1, (gr-0.85)/0.15)
-		spot := color.Scale(DotColor('w'), k)
+		spot := color.ScaleFloat(DotColor('w'), k)
 		g[top+1][1] = spot
 		g[top+1][3] = spot
 	}

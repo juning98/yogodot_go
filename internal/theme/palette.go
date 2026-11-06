@@ -73,11 +73,11 @@ var KBPalette = map[byte]color.RGB{
 }
 
 // DotColor 查点阵调色板。未知字符按熄灭处理。
-func DotColor(ch byte) color.RGB {
+func DotColor(ch byte) color.RGBFloat {
 	if c, ok := DotPalette[ch]; ok {
-		return c
+		return c.Float()
 	}
-	return color.RGB{}
+	return color.RGBFloat{}
 }
 
 // KBColor 查键盘调色板。未知字符与 '.' 一样按熄灭处理。

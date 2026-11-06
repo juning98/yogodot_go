@@ -28,7 +28,7 @@ func Clamp(v float64) uint8 {
 }
 
 // Float 转成浮点三元组，供内部计算用。
-func (c RGB) Float() [3]float64 { return [3]float64{float64(c[0]), float64(c[1]), float64(c[2])} }
+func (c RGB) Float() RGBFloat { return RGBFloat{float64(c[0]), float64(c[1]), float64(c[2])} }
 
 // FromFloat 把浮点通道夹到位。
 func FromFloat(f [3]float64) RGB {
@@ -163,6 +163,11 @@ func RGB565(c RGB) uint16 {
 
 // HSV 生成一个颜色。h 单位为度，s/v 为 0..1。
 func HSV(h, s, v float64) RGB {
+	return FromFloat(HSVFloat(h, s, v))
+}
+
+// HSVFloat 是点阵动画使用的浮点版本，保留亮度和色相插值的小数。
+func HSVFloat(h, s, v float64) RGBFloat {
 	h = math.Mod(math.Mod(h, 360)+360, 360)
 	cc := v * s
 	x := cc * (1 - math.Abs(math.Mod(h/60, 2)-1))
@@ -182,7 +187,7 @@ func HSV(h, s, v float64) RGB {
 	default:
 		r, g, b = cc, 0, x
 	}
-	return FromFloat([3]float64{(r + m) * 255, (g + m) * 255, (b + m) * 255})
+	return RGBFloat{(r + m) * 255, (g + m) * 255, (b + m) * 255}
 }
 
 // Mix 在两色之间线性插值，k=0 返回 a、k=1 返回 b。

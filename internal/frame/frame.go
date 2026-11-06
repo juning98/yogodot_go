@@ -23,7 +23,7 @@ const MatrixLen = DotRows * DotCols * 3
 const KeysLen = LEDCount * 2
 
 // Grid 是一帧点阵的渲染结果。行 0 在上、列 0 在左。
-type Grid [DotRows][DotCols]color.RGB
+type Grid [DotRows][DotCols]color.RGBFloat
 
 // LEDs 是一帧键盘灯的渲染结果，按 LED 索引 0..83 排列（不是按行列）。
 type LEDs [LEDCount]color.RGB
@@ -65,11 +65,27 @@ func (l LEDs) Any() bool {
 // Encode 把渲染结果编码成设备帧。points 是用户设置的点阵亮度（0..100），
 // applyCalib 决定是否套用键盘那套校正（默认 false，见 color.Calibration.Dot）。
 func (g Grid) Encode(cal color.Calibration, dotBright float64, applyCalib bool) Matrix {
+	return g.encode(cal, dotBright, applyCalib, false)
+}
+
+// EncodeAnimated 在最后一次亮度缩放后按固定空间阈值取整，
+// 避免同色区域的全部像素在呼吸时同时跳过一个 RGB 档位。
+func (g Grid) EncodeAnimated(cal color.Calibration, dotBright float64, applyCalib bool) Matrix {
+	return g.encode(cal, dotBright, applyCalib, true)
+}
+
+func (g Grid) encode(cal color.Calibration, dotBright float64, applyCalib, animated bool) Matrix {
 	var m Matrix
 	i := 0
 	for r := 0; r < DotRows; r++ {
 		for c := 0; c < DotCols; c++ {
-			px := cal.Dot(g[r][c], dotBright, applyCalib)
+			f := cal.DotFloat(g[r][c], dotBright, applyCalib)
+			var px color.RGB
+			if animated {
+				px = quantizeAnimated(f, r, c)
+			} else {
+				px = color.FromFloat(f)
+			}
 			m[i], m[i+1], m[i+2] = px[0], px[1], px[2]
 			i += 3
 		}

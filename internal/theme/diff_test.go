@@ -110,7 +110,7 @@ func gridOf(t *testing.T, rows [][][]int) frame.Grid {
 			t.Fatalf("第 %d 行有 %d 列", r, len(row))
 		}
 		for c, px := range row {
-			g[r][c] = color.RGB{uint8(px[0]), uint8(px[1]), uint8(px[2])}
+			g[r][c] = color.RGBFloat{float64(px[0]), float64(px[1]), float64(px[2])}
 		}
 	}
 	return g
@@ -261,7 +261,13 @@ func TestDotAnimationMatchesJS(t *testing.T) {
 			if !ok || wantRows == nil {
 				continue
 			}
+			// 动画保留小数；旧 JS fixture 是 RGB888，比较最终取整后的原色。
 			got := th.DotAt(tt)
+			for r := range got {
+				for c := range got[r] {
+					got[r][c] = color.FromFloat(got[r][c]).Float()
+				}
+			}
 			want := gridOf(t, wantRows)
 			if got != want {
 				diff := 0

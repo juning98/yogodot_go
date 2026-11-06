@@ -101,24 +101,24 @@ func duckDot(t float64) frame.Grid {
 	for c := 0; c < frame.DotCols; c++ {
 		k := 0.5 * (math.Sin(t*2.2+float64(c)*0.9) - math.Sin(float64(c)*0.9))
 		if k >= 0 {
-			g[5][c] = color.Mix(DotColor('b'), color.RGB{120, 220, 255}, k)
+			g[5][c] = color.MixFloat(DotColor('b'), color.RGBFloat{120, 220, 255}, k)
 		} else {
-			g[5][c] = color.Mix(DotColor('b'), color.RGB{15, 40, 130}, -k)
+			g[5][c] = color.MixFloat(DotColor('b'), color.RGBFloat{15, 40, 130}, -k)
 		}
 	}
 
 	// 下潜/上浮时水线两侧溅水花，水下冒气泡。
 	p := math.Mod(t, duckCycle)
 	if (p > 6 && p < 6.6) || (p > 9.6 && p < 10.4) {
-		g[4][0] = color.RGB{220, 245, 255}
-		g[4][5] = color.RGB{220, 245, 255}
+		g[4][0] = color.RGBFloat{220, 245, 255}
+		g[4][5] = color.RGBFloat{220, 245, 255}
 	}
 	if p > 6.2 && p < 9.8 {
 		for i, off := range []float64{0, 0.8, 1.6} {
 			y := 5 - math.Mod((p-6.2)*0.9+off, 2.8)
 			yy := int(y)
 			if yy >= 3 && yy <= 5 {
-				g[yy][[]int{1, 3, 4}[i]] = color.RGB{200, 240, 255}
+				g[yy][[]int{1, 3, 4}[i]] = color.RGBFloat{200, 240, 255}
 			}
 		}
 	}

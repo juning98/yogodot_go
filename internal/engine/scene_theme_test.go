@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/wednesque/yogod/internal/color"
+	"github.com/wednesque/yogod/internal/frame"
 	"github.com/wednesque/yogod/internal/theme"
 )
 
@@ -41,8 +43,60 @@ func TestThemeScenePatternOverridesDot(t *testing.T) {
 	// 置 nil 恢复主题默认点阵
 	sc.Pattern = nil
 	r2 := sc.Frame(0)
-	want2 := th.DotAt(0).Encode(sc.Cal, sc.DotBright, sc.ApplyDotCalib)
+	want2 := th.DotAt(0).EncodeAnimated(sc.Cal, sc.DotBright, sc.ApplyDotCalib)
 	if *r2.Matrix != want2 {
 		t.Error("清除图案后点阵应恢复主题默认")
+	}
+
+	// 关闭动态后继续使用普通编码，不引入空间量化。
+	sc.Dynamic = false
+	wantStatic := th.DotFrame().Encode(sc.Cal, sc.DotBright, sc.ApplyDotCalib)
+	if got := sc.Frame(time.Second); *got.Matrix != wantStatic {
+		t.Error("静态主题的点阵编码被动画量化改变")
+	}
+}
+
+// 低亮度下鲸身不能整片同步跳红，同时保留原色比和 22% 呼吸幅度。
+func TestDeepSeekLowBrightnessBreathing(t *testing.T) {
+	th, _ := theme.ByID("deepseek")
+	sc := NewThemeScene(th, true, color.DefaultCalibration())
+	sc.DotBright = 10
+	var prev frame.Matrix
+	var prevGrid frame.Grid
+	minB, maxB := 255.0, 0.0
+	for at := time.Duration(0); at < 8*time.Second; at += 67 * time.Millisecond {
+		m, g := *sc.Frame(at).Matrix, th.DotAt(at.Seconds())
+		var actual, ideal [3]float64
+		body, redChanges := 0, 0
+		for r := range g {
+			for c, px := range g[r] {
+				if px[0] == 0 || (r == 3 && c == 1) {
+					continue
+				}
+				body++
+				off := (r*frame.DotCols + c) * 3
+				for ch := range actual {
+					actual[ch] += float64(m[off+ch])
+					ideal[ch] += px[ch] * sc.DotBright / 100
+				}
+				if at > 0 && prevGrid[r][c][0] > 0 && m[off] != prev[off] {
+					redChanges++
+				}
+			}
+		}
+		for ch := range actual {
+			if err := math.Abs(actual[ch]-ideal[ch]) / float64(body); err > .16 {
+				t.Fatalf("%s 通道 %d 鲸身平均误差=%g", at, ch, err)
+			}
+		}
+		if redChanges > 4 {
+			t.Fatalf("%s 同步跳红像素过多：%d", at, redChanges)
+		}
+		meanB := actual[2] / float64(body)
+		minB, maxB = math.Min(minB, meanB), math.Max(maxB, meanB)
+		prev, prevGrid = m, g
+	}
+	if amplitude := 1 - minB/maxB; math.Abs(amplitude-.22) > .02 {
+		t.Fatalf("22%% 的呼吸幅度改变：%g", amplitude)
 	}
 }

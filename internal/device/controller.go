@@ -31,7 +31,7 @@ import (
 const (
 	// ReplyTimeout 是等一条命令回包的时间。2.4G 转发有延迟，键盘刚醒更慢。
 	ReplyTimeout = 900 * time.Millisecond
-	// HandshakeEvery 是握手节流：这段时间内不重复握手。
+	// HandshakeEvery 是会话空闲期限：持续通信会续期，空闲超时后重新握手。
 	HandshakeEvery = 4 * time.Second
 	// PowerEvery 是电量轮询间隔。电量变化慢，没必要频繁占用通道。
 	PowerEvery = 30 * time.Second
@@ -608,11 +608,12 @@ func (c *Controller) transact(ctx context.Context, pkt proto.Packet, wait bool) 
 	}
 }
 
-// handshake 握手，带节流。
+// handshake 在会话空闲超时后握手；持续通信续期，与官方 startCorrespond 一致。
 func (c *Controller) handshake(ctx context.Context) {
 	c.mu.Lock()
 	now := time.Now()
 	if now.Sub(c.lastHand) < HandshakeEvery {
+		c.lastHand = now
 		c.mu.Unlock()
 		return
 	}
@@ -629,6 +630,19 @@ func (c *Controller) ping(ctx context.Context) bool {
 	c.handshake(ctx)
 	b, err := c.transact(ctx, proto.New(proto.CmdReadConfig, 0, nil), true)
 	return err == nil && b != nil
+}
+
+// EndDotSync 结束固件点阵同步会话。官方自定义播放在设置模式 6 前执行此操作。
+func (c *Controller) EndDotSync(ctx context.Context) error {
+	c.handshake(ctx)
+	b, err := c.transact(ctx, proto.New(proto.CmdEndSyncDot, 0, nil), true)
+	if err != nil {
+		return err
+	}
+	if b == nil {
+		return fmt.Errorf("device: 结束点阵同步超时")
+	}
+	return nil
 }
 
 // ReadConfig 读完整的 64 字节配置。
@@ -834,12 +848,17 @@ func (c *Controller) SendMatrix(ctx context.Context, m frame.Matrix) (Result, er
 // 那是纯函数、有单元测试 —— 旧版把它埋在循环里，最后一包算错就整块屏缺一角。
 func (c *Controller) writeMatrix(ctx context.Context, m frame.Matrix) error {
 	c.handshake(ctx)
+	// 官方自定义点阵连续发送一帧的 5 个包；有线无需 2.4G 的包间让路。
+	gap := packetGap
+	if c.Wired() {
+		gap = 0
+	}
 	for _, p := range MatrixPackets(m) {
 		if _, err := c.transact(ctx, p, false); err != nil {
 			return err
 		}
-		if packetGap > 0 {
-			time.Sleep(packetGap)
+		if gap > 0 {
+			time.Sleep(gap)
 		}
 	}
 	atomic.AddUint64(&c.sent, 1)

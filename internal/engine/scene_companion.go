@@ -210,8 +210,8 @@ func (c *CompanionScene) Frame(t time.Duration) Render {
 
 	// dt 只在完成/出错里用：一次性动画需要"进入这个状态多久了"。
 	dt := time.Since(c.stateSince).Seconds()
-	g := compFrame(name, c.cellsFor(name), st, col, t.Seconds(), dt)
-	m := g.Encode(color.DefaultCalibration(), 50, false)
+	g := compFrame(name, c.cellsFor(name), st, col.Float(), t.Seconds(), dt)
+	m := g.EncodeAnimated(color.DefaultCalibration(), 50, false)
 	// 预览帧满亮度：设备端压一半的点阵，页面上看原始颜色。
 	pm := g.Encode(color.DefaultCalibration(), 100, false)
 
@@ -225,7 +225,7 @@ func (c *CompanionScene) Frame(t time.Duration) Render {
 }
 
 // compFrame 按状态分发到各自的节奏。
-func compFrame(name string, cells compCells, st agent.State, col color.RGB, t, dt float64) frame.Grid {
+func compFrame(name string, cells compCells, st agent.State, col color.RGBFloat, t, dt float64) frame.Grid {
 	switch st {
 	case agent.StateBusy:
 		return compBusy(name, cells, col, t)
@@ -242,19 +242,19 @@ func compFrame(name string, cells compCells, st agent.State, col color.RGB, t, d
 	}
 }
 
-var white = color.RGB{255, 255, 255}
+var white = color.RGBFloat{255, 255, 255}
 
 // paint 按三档亮度铺一个形状。
-func paint(c compCells, col color.RGB, bodyBr, detailBr, eyeBr float64) frame.Grid {
+func paint(c compCells, col color.RGBFloat, bodyBr, detailBr, eyeBr float64) frame.Grid {
 	var g frame.Grid
 	for _, p := range c.body {
-		g[p[0]][p[1]] = color.Scale(col, bodyBr)
+		g[p[0]][p[1]] = color.ScaleFloat(col, bodyBr)
 	}
 	for _, p := range c.detail {
-		g[p[0]][p[1]] = color.Scale(col, detailBr)
+		g[p[0]][p[1]] = color.ScaleFloat(col, detailBr)
 	}
 	for _, p := range c.eyes {
-		g[p[0]][p[1]] = color.Scale(col, eyeBr)
+		g[p[0]][p[1]] = color.ScaleFloat(col, eyeBr)
 	}
 	return g
 }
@@ -269,24 +269,9 @@ func thump(ph, off, width float64) float64 {
 	return math.Sin(math.Pi * p / width)
 }
 
-// mixRGB 把 a 往 b 混 k 比例（完成态的涟漪洗白用）。
-func mixRGB(a, b color.RGB, k float64) color.RGB {
-	if k <= 0 {
-		return a
-	}
-	if k > 1 {
-		k = 1
-	}
-	return color.RGB{
-		uint8(float64(a[0]) + (float64(b[0])-float64(a[0]))*k),
-		uint8(float64(a[1]) + (float64(b[1])-float64(a[1]))*k),
-		uint8(float64(a[2]) + (float64(b[2])-float64(a[2]))*k),
-	}
-}
-
 // compIdle 空闲：7 秒一周期的慢呼吸，证明"我还活着"，但不抢注意力。
 // Claude 每 6.4 秒眨一次眼；Codex 的 >_ 像终端光标一样闪。
-func compIdle(name string, c compCells, col color.RGB, t float64) frame.Grid {
+func compIdle(name string, c compCells, col color.RGBFloat, t float64) frame.Grid {
 	// 吸气必须顶到纯白:白色是唯一"压亮度即变灰"的颜色,
 	// 波峰不碰 1.0 的话页面和屏幕上永远只能看到一层灰。
 	br := 0.60 + 0.40*sin(t*2*math.Pi/7)
@@ -306,18 +291,18 @@ func compIdle(name string, c compCells, col color.RGB, t float64) frame.Grid {
 }
 
 // compBusy 执行中：一道流光扫过形状，每家工具扫法不一样。
-func compBusy(name string, c compCells, col color.RGB, t float64) frame.Grid {
+func compBusy(name string, c compCells, col color.RGBFloat, t float64) frame.Grid {
 	g := paint(c, col, 0, 0, 0)
 	switch name {
 	case "claude-code":
 		// 细波光：低振幅的行间流动，螃蟹是活的但不张扬
 		for _, p := range c.body {
 			br := 0.52 + 0.20*sin(t*2.2+float64(p[0])*0.9+float64(p[1])*0.35)
-			g[p[0]][p[1]] = color.Scale(col, br)
+			g[p[0]][p[1]] = color.ScaleFloat(col, br)
 		}
 		for _, p := range c.eyes {
 			br := 0.52 + 0.20*sin(t*2.2+float64(p[0])*0.9+float64(p[1])*0.35)
-			g[p[0]][p[1]] = color.Scale(col, br)
+			g[p[0]][p[1]] = color.ScaleFloat(col, br)
 		}
 	case "opencode":
 		// 行扫描：边框逐行点亮滚下去，门在过数据
@@ -327,35 +312,35 @@ func compBusy(name string, c compCells, col color.RGB, t float64) frame.Grid {
 			if p[0] == s {
 				br = 1.0
 			}
-			g[p[0]][p[1]] = color.Scale(col, br)
+			g[p[0]][p[1]] = color.ScaleFloat(col, br)
 		}
 		for _, p := range c.detail {
 			br := 0.12
 			if p[0] == s {
 				br = 0.55
 			}
-			g[p[0]][p[1]] = color.Scale(col, br)
+			g[p[0]][p[1]] = color.ScaleFloat(col, br)
 		}
 	default:
 		// 对角流光：cos⁴ 压窄的亮带从左下扫到右上，扫过才是一"道"光
 		for _, p := range c.body {
 			w := math.Pow(math.Max(0, math.Cos((float64(p[0])*0.95+float64(p[1])*0.65-t*2.2)*math.Pi)), 4)
-			g[p[0]][p[1]] = color.Scale(col, 0.50+0.44*w)
+			g[p[0]][p[1]] = color.ScaleFloat(col, 0.50+0.44*w)
 		}
 		for _, p := range c.detail {
 			w := math.Pow(math.Max(0, math.Cos((float64(p[0])*0.95+float64(p[1])*0.65-t*2.2)*math.Pi)), 4)
-			g[p[0]][p[1]] = color.Scale(col, 0.35+0.40*w)
+			g[p[0]][p[1]] = color.ScaleFloat(col, 0.35+0.40*w)
 		}
 		for _, p := range c.eyes {
 			w := math.Pow(math.Max(0, math.Cos((float64(p[0])*0.95+float64(p[1])*0.65-t*2.2)*math.Pi)), 4)
-			g[p[0]][p[1]] = color.Scale(col, 0.50+0.44*w)
+			g[p[0]][p[1]] = color.ScaleFloat(col, 0.50+0.44*w)
 		}
 	}
 	return g
 }
 
 // compWait 等你授权：双跳心跳，形状随两跳起伏。
-func compWait(c compCells, col color.RGB, t float64) frame.Grid {
+func compWait(c compCells, col color.RGBFloat, t float64) frame.Grid {
 	ph := math.Mod(t, 0.9)
 	pulse := thump(ph, 0, 0.13) + 0.72*thump(ph, 0.19, 0.12)
 	if pulse > 1 {
@@ -366,7 +351,7 @@ func compWait(c compCells, col color.RGB, t float64) frame.Grid {
 }
 
 // compAsk 等你补充：三连轻叩，一波弱过一波 —— 像敲门：在吗、在吗、在吗。
-func compAsk(c compCells, col color.RGB, t float64) frame.Grid {
+func compAsk(c compCells, col color.RGBFloat, t float64) frame.Grid {
 	ph := math.Mod(t, 1.15)
 	pulse := thump(ph, 0, 0.14) +
 		0.72*thump(ph, 0.17, 0.14) +
@@ -380,13 +365,13 @@ func compAsk(c compCells, col color.RGB, t float64) frame.Grid {
 
 // compDone 完成：亮一下，一道光晕从中心荡过形状（经过的地方洗白），
 // 余韵是一点很轻的闪烁 —— "成了"用绽放说，不用符号。
-func compDone(c compCells, col color.RGB, dt float64) frame.Grid {
+func compDone(c compCells, col color.RGBFloat, dt float64) frame.Grid {
 	base := 0.55 + 0.45*math.Exp(-dt*3.5) + 0.05*sin(dt*3)
 	var g frame.Grid
 	put := func(p [2]int, k float64) {
 		d := math.Hypot((float64(p[0])-2.5)/2.6, (float64(p[1])-2.5)/2.6)
 		rip := math.Pow(math.Max(0, math.Cos((d*1.5-dt*2.6)*math.Pi)), 8) * math.Exp(-dt*0.8)
-		g[p[0]][p[1]] = color.Scale(mixRGB(col, white, 0.22*rip), (base+0.45*rip)*k)
+		g[p[0]][p[1]] = color.ScaleFloat(color.MixFloat(col, white, 0.22*rip), (base+0.45*rip)*k)
 	}
 	for _, p := range c.body {
 		put(p, 1)
@@ -402,7 +387,7 @@ func compDone(c compCells, col color.RGB, dt float64) frame.Grid {
 
 // compError 出错：警示双闪 —— 急两声、长一息，正弦沿不刺眼。
 // 不摆字形：红色加这个节奏本身就是"砸了"。
-func compError(c compCells, col color.RGB, dt float64) frame.Grid {
+func compError(c compCells, col color.RGBFloat, dt float64) frame.Grid {
 	ph := math.Mod(dt, 1.4)
 	pulse := thump(ph, 0, 0.12) + 0.85*thump(ph, 0.19, 0.12)
 	if pulse > 1 {

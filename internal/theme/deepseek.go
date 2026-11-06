@@ -41,7 +41,7 @@ func deepseekDot(t float64) frame.Grid {
 	// 与静态帧一致；扫到 4 时凹口合上，扫到 2 时尾鳍张开。
 	lc := int(math.Round(3 + 1.2*math.Sin(t*2.2)))
 	if lc != 3 {
-		g[0][3] = color.RGB{}
+		g[0][3] = color.RGBFloat{}
 	}
 	if lc >= 0 && lc < frame.DotCols {
 		g[0][lc] = DotColor('D')
@@ -49,7 +49,7 @@ func deepseekDot(t float64) frame.Grid {
 
 	// 眨眼：3.4 秒一次，末尾 0.12 秒。t=0 时睁着。
 	if math.Mod(t, 3.4) > 3.28 {
-		g[3][1] = color.RGB{}
+		g[3][1] = color.RGBFloat{}
 	}
 
 	// 呼吸：余弦从 1 开始，所以 t=0 的帧与静态图逐格一致。

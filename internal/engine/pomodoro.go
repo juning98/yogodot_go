@@ -299,7 +299,7 @@ func (p *Pomodoro) Frame(t time.Duration) Render {
 		l = barKeys(progress, phase == PhaseBreak)
 	}
 
-	m := g.Encode(color.DefaultCalibration(), 50, false)
+	m := g.EncodeAnimated(color.DefaultCalibration(), 50, false)
 	k := l.Encode(color.DefaultCalibration(), 70)
 	// 预览帧直通原色：校准和亮度都是灯珠的电气补偿，页面显示原始颜色。
 	pm := g.Encode(color.DefaultCalibration(), 100, false)
@@ -327,12 +327,12 @@ func (p *Pomodoro) Exit(context.Context, *device.Controller) {}
 // ringFrame 画进度环：外圈 20 格随进度点亮，中间一块随呼吸明暗。
 func ringFrame(t, progress float64, isBreak bool) frame.Grid {
 	var g frame.Grid
-	base := color.RGB{255, 120, 0}
+	base := color.RGBFloat{255, 120, 0}
 	if isBreak {
-		base = color.RGB{40, 225, 80}
+		base = color.RGBFloat{40, 225, 80}
 	} else if progress > 0.8 {
 		// 最后 20% 从橙推向红
-		base = color.Mix(color.RGB{255, 120, 0}, color.RGB{255, 20, 20}, (progress-0.8)/0.2)
+		base = color.MixFloat(color.RGBFloat{255, 120, 0}, color.RGBFloat{255, 20, 20}, (progress-0.8)/0.2)
 	}
 
 	lit := int(progress*float64(len(ring)) + 0.5)
@@ -340,12 +340,12 @@ func ringFrame(t, progress float64, isBreak bool) frame.Grid {
 		if i < lit {
 			g[rc[0]][rc[1]] = base
 		} else {
-			g[rc[0]][rc[1]] = color.RGB{12, 9, 16}
+			g[rc[0]][rc[1]] = color.RGBFloat{12, 9, 16}
 		}
 	}
 	// 中心呼吸
 	p := 0.35 + 0.65*absf(sin(t*1.6))
-	center := color.Scale(base, p*0.9)
+	center := color.ScaleFloat(base, p*0.9)
 	for _, rc := range [][2]int{{2, 2}, {2, 3}, {3, 2}, {3, 3}} {
 		g[rc[0]][rc[1]] = center
 	}
@@ -368,9 +368,9 @@ func tomatoFrame(t float64) frame.Grid {
 			}
 			switch row[c] {
 			case 'g':
-				g[rr][c] = color.RGB{color.Clamp(60 * b), color.Clamp(235 * b), color.Clamp(50 * b)}
+				g[rr][c] = color.RGBFloat{color.ClampFloat(60 * b), color.ClampFloat(235 * b), color.ClampFloat(50 * b)}
 			case 'r':
-				g[rr][c] = color.RGB{color.Clamp(255 * b), color.Clamp(45 * b), color.Clamp(30 * b)}
+				g[rr][c] = color.RGBFloat{color.ClampFloat(255 * b), color.ClampFloat(45 * b), color.ClampFloat(30 * b)}
 			}
 		}
 	}
